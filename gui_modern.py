@@ -2593,8 +2593,84 @@ class ModernApp(ctk.CTk):
                 self.after(0, lambda: self._apply_preview_source(gen, source))
             except Exception:
                 pass
+            self._enrich_preview_metadata(self._preview_video, source, gen)
 
         threading.Thread(target=_resolve, daemon=True).start()
+
+    def _enrich_preview_metadata(self, video: dict, source: PreviewSource, gen: int):
+        """Cross-search MissAV and SupJav if actor, actress, director, studio, or tags are missing."""
+        title_or_url = f"{video.get('title', '')} {video.get('url', '')} {source.page_url}"
+        m = re.search(r'([a-zA-Z]{2,6}-\d{3,5})', title_or_url, re.IGNORECASE)
+        code = m.group(1).upper() if m else ''
+
+        missing_actor = not (video.get('actor') or video.get('actress') or video.get('models'))
+        missing_director = not (video.get('director'))
+        missing_studio = not (video.get('studio') or video.get('maker'))
+        missing_tags = not (video.get('tags') or video.get('categories'))
+
+        if not (missing_actor or missing_director or missing_studio or missing_tags):
+            return
+
+        try:
+            from M3U8Sites.SiteMissAV import MissAVBrowser
+            from M3U8Sites.SiteSupJav import SupJavBrowser
+        except Exception:
+            return
+
+        search_query = code or video.get('title', '')[:25]
+        if not search_query:
+            return
+
+        enriched = {}
+
+        # 1. Search MissAV
+        try:
+            mav_vids = MissAVBrowser.search(search_query)
+            if mav_vids and isinstance(mav_vids, list):
+                mv = mav_vids[0]
+                if mv.get('actor') or mv.get('models') or mv.get('actress'):
+                    enriched['actor'] = mv.get('actor') or mv.get('models') or mv.get('actress')
+                    enriched['actress'] = mv.get('actress') or mv.get('actor')
+                if mv.get('studio') or mv.get('maker'):
+                    enriched['studio'] = mv.get('studio') or mv.get('maker')
+                if mv.get('director'):
+                    enriched['director'] = mv.get('director')
+                if mv.get('tags') or mv.get('categories'):
+                    enriched['tags'] = mv.get('tags') or mv.get('categories')
+        except Exception:
+            pass
+
+        # 2. Search SupJav if still missing metadata
+        if not (enriched.get('actor') and enriched.get('studio') and enriched.get('director') and enriched.get('tags')):
+            try:
+                sup_vids = SupJavBrowser.search(search_query)
+                if sup_vids and isinstance(sup_vids, list):
+                    sv = sup_vids[0]
+                    if not enriched.get('actor') and (sv.get('actor') or sv.get('actress') or sv.get('models')):
+                        enriched['actor'] = sv.get('actor') or sv.get('actress') or sv.get('models')
+                        enriched['actress'] = sv.get('actress') or sv.get('actor')
+                    if not enriched.get('studio') and (sv.get('studio') or sv.get('maker')):
+                        enriched['studio'] = sv.get('studio') or sv.get('maker')
+                    if not enriched.get('director') and sv.get('director'):
+                        enriched['director'] = sv.get('director')
+                    if not enriched.get('tags') and (sv.get('tags') or sv.get('categories')):
+                        enriched['tags'] = sv.get('tags') or sv.get('categories')
+            except Exception:
+                pass
+
+        if enriched:
+            for k, v in enriched.items():
+                if v and not self._preview_video.get(k):
+                    self._preview_video[k] = v
+
+            def _update():
+                if not getattr(self, '_is_closing', False) and gen == getattr(self, '_preview_gen', 0):
+                    self._render_preview_detail(source)
+
+            try:
+                self.after(0, _update)
+            except Exception:
+                pass
 
     def _clear_preview_area(self):
         self._stop_preview_player()
