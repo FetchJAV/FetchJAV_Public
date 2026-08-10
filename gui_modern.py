@@ -1467,7 +1467,7 @@ class ModernApp(ctk.CTk):
         if width <= 1:
             width = 1280
 
-        is_compact_header = width < 760
+        is_compact_header = width < 960
         is_compact_sidebar = width < 880
 
         tab_labels = {'browse': T('tab_browse'), 'download': T('tab_download'), 'settings': T('tab_settings')}
@@ -1508,6 +1508,30 @@ class ModernApp(ctk.CTk):
                             btn.configure(text=f"{cat_icon}  {cat_label}", anchor='w')
                     except Exception:
                         pass
+
+        # Dynamic browse toolbar row rearrangement for narrow window sizes
+        toolbar_shell = getattr(self, '_top_toolbar_shell', None)
+        row1 = getattr(self, '_top_toolbar_row1', None)
+        row2 = getattr(self, '_top_toolbar_row2', None)
+        actions = getattr(self, '_toolbar_actions', None)
+        current_mode = getattr(self, '_toolbar_layout_mode', 'wide')
+
+        if toolbar_shell and row1 and row2 and actions:
+            is_narrow = width < 960
+            target_mode = 'narrow' if is_narrow else 'wide'
+            if target_mode != current_mode:
+                self._toolbar_layout_mode = target_mode
+                try:
+                    if target_mode == 'narrow':
+                        actions.pack_forget()
+                        row2.pack(fill='x', padx=12, pady=(0, 6))
+                        actions.pack(in_=row2, side='right')
+                    else:
+                        actions.pack_forget()
+                        row2.pack_forget()
+                        actions.pack(in_=row1, side='right')
+                except Exception:
+                    pass
 
     def _on_root_resize(self, event):
         if event.widget is not self or self._is_closing:
@@ -1878,7 +1902,7 @@ class ModernApp(ctk.CTk):
                 pass
 
         tab_nav = ctk.CTkFrame(header, fg_color='transparent')
-        tab_nav.place(relx=0.5, rely=0.5, anchor='center')
+        tab_nav.pack(side='left', padx=(24, 0), fill='y')
 
         self._tab_buttons = {}
         for idx, key in enumerate(self._tab_keys):
@@ -2052,23 +2076,24 @@ class ModernApp(ctk.CTk):
     def _build_browse_tab(self):
         tab = self._tab_frames['browse']
 
-        # ── Single-level inline workspace toolbar ───────────────────
-        top = ctk.CTkFrame(tab, fg_color=BG_SECTION, corner_radius=0, height=48)
-        top.pack(fill='x')
-        top.pack_propagate(False)
+        # ── Workspace toolbar (adaptive 1-row / 2-row layout) ───────────────
+        self._top_toolbar_shell = ctk.CTkFrame(tab, fg_color=BG_SECTION, corner_radius=0)
+        self._top_toolbar_shell.pack(fill='x')
 
-        filters = ctk.CTkFrame(top, fg_color='transparent')
-        filters.pack(fill='x', padx=12, pady=6)
+        self._top_toolbar_row1 = ctk.CTkFrame(self._top_toolbar_shell, fg_color='transparent')
+        self._top_toolbar_row1.pack(fill='x', padx=12, pady=(6, 6))
+
+        self._top_toolbar_row2 = ctk.CTkFrame(self._top_toolbar_shell, fg_color='transparent')
 
         self._site_var = ctk.StringVar(value=self._site_key)
         self._site_menu = SiteSelectorBar(
-            filters, sites=list(SITES.keys()), selected=self._site_key,
+            self._top_toolbar_row1, sites=list(SITES.keys()), selected=self._site_key,
             command=self._on_site_change)
         self._site_menu.pack(side='left')
 
         self._cat_var = ctk.StringVar(value=T('loading_browse'))
         self._cat_menu = ctk.CTkOptionMenu(
-            filters, values=[T('loading_browse')], variable=self._cat_var,
+            self._top_toolbar_row1, values=[T('loading_browse')], variable=self._cat_var,
             command=self._on_cat_change, width=165, height=36,
             fg_color=BG_CARD, button_color=BG_CARD,
             button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
@@ -2079,7 +2104,7 @@ class ModernApp(ctk.CTk):
         self._cat_menu.pack(side='left', padx=(8, 0))
 
         search_box = ctk.CTkFrame(
-            filters, fg_color=BG_INPUT, border_color=BORDER,
+            self._top_toolbar_row1, fg_color=BG_INPUT, border_color=BORDER,
             border_width=1, corner_radius=CONTROL_RADIUS, height=36)
         search_box.pack(side='left', fill='x', expand=True, padx=(8, 8))
         search_box.pack_propagate(False)
@@ -2106,19 +2131,10 @@ class ModernApp(ctk.CTk):
             icon_lbl = ctk.CTkLabel(search_box, text="🔍", text_color=TEXT_SEC)
             icon_lbl.pack(side='right', padx=(2, 8))
 
-        # Action buttons inline on the right side of the toolbar
-        ctk.CTkButton(filters, text=T('download_selected'), command=self._download_selected,
-                      width=138, height=36, corner_radius=CONTROL_RADIUS,
-                      fg_color=('#FDE8EC', '#2B161B'),
-                      border_width=1, border_color=ACCENT,
-                      hover_color=('#FAD2DB', '#3F1F26'),
-                      text_color=ACCENT, font=(ui_font(), 11, 'bold')).pack(
-                          side='right', padx=(6, 0))
-        ctk.CTkButton(filters, text=T('add_to_queue'), command=self._add_selected_to_queue,
-                      width=104, height=36, corner_radius=CONTROL_RADIUS,
-                      fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
-                      hover_color=BG_CARD_HOVER,
-                      text_color=TEXT_PRI, font=(ui_font(), 11)).pack(side='right', padx=(6, 0))
+        # Container for right-side action buttons
+        self._toolbar_actions = ctk.CTkFrame(self._top_toolbar_row1, fg_color='transparent')
+        self._toolbar_actions.pack(side='right')
+
         def _on_select_option_change(choice):
             if choice == T('select_all_btn') or 'Select' in choice or '全' in choice:
                 self._select_all_on_page()
@@ -2127,7 +2143,7 @@ class ModernApp(ctk.CTk):
 
         self._select_menu_var = ctk.StringVar(value=T('select_all_btn'))
         self._select_menu = ctk.CTkOptionMenu(
-            filters,
+            self._toolbar_actions,
             values=[T('select_all_btn'), T('unselect_all_btn')],
             variable=self._select_menu_var,
             command=_on_select_option_change,
@@ -2137,7 +2153,26 @@ class ModernApp(ctk.CTk):
             dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
             dropdown_text_color=WHITE, dynamic_resizing=False,
             font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11))
-        self._select_menu.pack(side='right')
+        self._select_menu.pack(side='left', padx=(0, 6))
+
+        self._add_q_btn = ctk.CTkButton(
+            self._toolbar_actions, text=T('add_to_queue'), command=self._add_selected_to_queue,
+            width=104, height=36, corner_radius=CONTROL_RADIUS,
+            fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, font=(ui_font(), 11))
+        self._add_q_btn.pack(side='left', padx=(0, 6))
+
+        self._dl_selected_btn = ctk.CTkButton(
+            self._toolbar_actions, text=T('download_selected'), command=self._download_selected,
+            width=138, height=36, corner_radius=CONTROL_RADIUS,
+            fg_color=('#FDE8EC', '#2B161B'),
+            border_width=1, border_color=ACCENT,
+            hover_color=('#FAD2DB', '#3F1F26'),
+            text_color=ACCENT, font=(ui_font(), 11, 'bold'))
+        self._dl_selected_btn.pack(side='left')
+
+        self._toolbar_layout_mode = 'wide'
 
         # ── Content area: sidebar + grid ────────────────────────────
         content = ctk.CTkFrame(tab, fg_color=BG_DARK, corner_radius=0)
