@@ -2934,11 +2934,11 @@ class ModernApp(ctk.CTk):
             rcard = ctk.CTkFrame(
                 right_sidebar, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
                 border_width=1, border_color=BORDER_CARD)
-            rcard.pack(fill='x', padx=6, pady=8)
+            rcard.pack(fill='x', padx=4, pady=6)
 
-            # Large Top Preview Image (full width of sidebar card, 210px height)
-            rthumb_holder = ctk.CTkFrame(rcard, fg_color=BG_SIDEBAR, height=210, corner_radius=CARD_RADIUS)
-            rthumb_holder.pack(fill='x', padx=0, pady=(0, 8))
+            # Top Preview Image Container (original aspect ratio fit without zooming)
+            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=180, corner_radius=CARD_RADIUS)
+            rthumb_holder.pack(fill='x', padx=0, pady=(0, 6))
             rthumb_holder.pack_propagate(False)
 
             rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
@@ -2949,18 +2949,18 @@ class ModernApp(ctk.CTk):
             if r_dur:
                 ctk.CTkLabel(
                     rthumb_holder, text=f' {r_dur} ', text_color=WHITE, fg_color='#000000',
-                    corner_radius=4, font=('Consolas', 9, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-8, y=-8)
+                    corner_radius=4, font=('Consolas', 9, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-6, y=-6)
 
-            # Details Section (title and tags below the preview image)
+            # Details Section (title neatly wrapped below the preview image)
             rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
-            rinfo.pack(fill='x', padx=12, pady=(0, 10))
+            rinfo.pack(fill='x', padx=10, pady=(0, 8))
 
             ctk.CTkLabel(
                 rinfo, text=r_title, text_color=TEXT_PRI,
-                font=(ui_font(), 11, 'bold'), wraplength=400, justify='left').pack(anchor='w', pady=(0, 6))
+                font=(ui_font(), 11, 'bold'), wraplength=340, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
 
             rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
-            rbadges.pack(anchor='w')
+            rbadges.pack(anchor='w', pady=(2, 0))
 
             ctk.CTkLabel(
                 rbadges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
