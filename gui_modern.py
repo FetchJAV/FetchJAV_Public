@@ -2668,9 +2668,9 @@ class ModernApp(ctk.CTk):
         left_main = ctk.CTkFrame(split, fg_color='transparent')
         left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
-        # Right Sidebar Pane (Related Videos) - Compact Width 350px
-        right_sidebar = ctk.CTkFrame(split, width=350, fg_color='transparent')
-        right_sidebar.pack(side='right', fill='y', anchor='n', padx=(0, 4))
+        # Right Sidebar Pane (Related Videos) - Width 340px with right margin to clear scrollbar
+        right_sidebar = ctk.CTkFrame(split, width=340, fg_color='transparent')
+        right_sidebar.pack(side='right', fill='y', anchor='n', padx=(0, 16))
 
         # ── 1. EMBEDDED VIDEO PLAYER FRAME ─────────────────────────────────
         player_container = ctk.CTkFrame(
@@ -2937,11 +2937,11 @@ class ModernApp(ctk.CTk):
                 corner_radius=CARD_RADIUS,
                 border_width=2 if r_is_sel else 1,
                 border_color=ACCENT if r_is_sel else BORDER_CARD)
-            rcard.pack(fill='x', padx=4, pady=6)
+            rcard.pack(fill='x', padx=2, pady=6)
 
             # Top Preview Image Container (compact framed preview holder)
-            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=140, corner_radius=6)
-            rthumb_holder.pack(fill='x', padx=6, pady=(8, 0))
+            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=145, corner_radius=6)
+            rthumb_holder.pack(fill='x', padx=6, pady=(6, 0))
             rthumb_holder.pack_propagate(False)
 
             rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
@@ -2956,11 +2956,11 @@ class ModernApp(ctk.CTk):
 
             # Details Section (title neatly wrapped below the preview image)
             rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
-            rinfo.pack(fill='x', padx=8, pady=(8, 8))
+            rinfo.pack(fill='x', padx=8, pady=(6, 8))
 
             ctk.CTkLabel(
                 rinfo, text=r_title, text_color=TEXT_PRI,
-                font=(ui_font(), 10, 'bold'), wraplength=280, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
+                font=(ui_font(), 10, 'bold'), wraplength=290, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
 
             rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
             rbadges.pack(anchor='w')
