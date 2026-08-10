@@ -1456,7 +1456,7 @@ class ModernApp(ctk.CTk):
             self._theme_btn.configure(text=self._theme_glyph())
 
     def _update_responsive_nav(self, width: int = None):
-        if self._is_closing:
+        if getattr(self, '_is_closing', False):
             return
         if width is None:
             try:
@@ -1464,9 +1464,13 @@ class ModernApp(ctk.CTk):
             except Exception:
                 width = self.winfo_width()
 
-        is_compact = width < 900
+        if width <= 1:
+            width = 1280
+
+        is_compact_header = width < 760
+        is_compact_sidebar = width < 880
+
         tab_labels = {'browse': T('tab_browse'), 'download': T('tab_download'), 'settings': T('tab_settings')}
-        fallback_glyphs = {'browse': '🌐', 'download': '↓', 'settings': '⚙'}
 
         for key in getattr(self, '_tab_keys', []):
             info = getattr(self, '_tab_buttons', {}).get(key)
@@ -1474,11 +1478,8 @@ class ModernApp(ctk.CTk):
                 continue
             btn = info['btn']
             try:
-                if is_compact:
-                    if not getattr(self, '_nav_icons', None) or key not in self._nav_icons:
-                        btn.configure(text=fallback_glyphs.get(key, ''))
-                    else:
-                        btn.configure(text="")
+                if is_compact_header:
+                    btn.configure(text="")
                 else:
                     btn.configure(text=f" {tab_labels[key]}")
             except Exception:
@@ -1488,7 +1489,7 @@ class ModernApp(ctk.CTk):
             left_nav = getattr(self, '_settings_left_nav', None)
             if left_nav:
                 try:
-                    left_nav.configure(width=56 if is_compact else 210)
+                    left_nav.configure(width=56 if is_compact_sidebar else 210)
                 except Exception:
                     pass
 
@@ -1501,7 +1502,7 @@ class ModernApp(ctk.CTk):
                 btn = self._settings_nav_btns.get(cat_key)
                 if btn:
                     try:
-                        if is_compact:
+                        if is_compact_sidebar:
                             btn.configure(text=cat_icon, anchor='center')
                         else:
                             btn.configure(text=f"{cat_icon}  {cat_label}", anchor='w')
