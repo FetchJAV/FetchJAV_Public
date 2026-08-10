@@ -1,0 +1,99 @@
+Created At: 2026-08-10T14:15:10+05:30
+Completed At: 2026-08-10T14:15:11+05:30
+File Path: `file:///C:/Users/workd/Desktop/Projects/JableTV/JableTV-MissAV-Downloader-GUI-2026-master/gui_modern.py`
+Total Lines: 4963
+Total Bytes: 218873
+Showing lines 2170 to 2260
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+2170: 
+2171:     def _find_video_by_url(self, url: str) -> dict:
+2172:         for video in self._videos:
+2173:             if video.get('url') == url:
+2174:                 return dict(video)
+2175:         return {'url': url, 'title': url}
+2176: 
+2177:     def _open_preview_for_url(self, url: str):
+2178:         self._open_preview(self._find_video_by_url(url))
+2179: 
+2180:     def _open_preview(self, video: dict):
+2181:         url = str((video or {}).get('url') or '').strip()
+2182:         if not url:
+2183:             return
+2184:         self._preview_gen += 1
+2185:         gen = self._preview_gen
+2186:         self._preview_video = dict(video or {})
+2187:         self._preview_source = None
+2188:         self._set_browse_mode('preview')
+2189:         self._render_preview_loading(self._preview_video)
+2190:         if getattr(self, '_status_lbl', None):
+2191:             self._status_lbl.configure(text=T('preview_resolving'))
+2192: 
+2193:         def _resolve():
+2194:             source = resolve_preview_source(url, self._preview_video)
+2195:             self._ui(lambda: self._apply_preview_source(gen, source), gen=self._build_gen)
+2196: 
+2197:         threading.Thread(target=_resolve, daemon=True).start()
+2198: 
+2199:     def _clear_preview_area(self):
+2200:         self._stop_preview_player()
+2201:         area = getattr(self, '_preview_area', None)
+2202:         if not area:
+2203:             return
+2204:         for child in area.winfo_children():
+2205:             try:
+2206:                 child.destroy()
+2207:             except tk.TclError:
+2208:                 pass
+2209:         self._preview_thumb_refs = []
+2210: 
+2211:     def _render_preview_loading(self, video: dict):
+2212:         self._clear_preview_area()
+2213:         area = self._preview_area
+2214:         shell = ctk.CTkFrame(area, fg_color=BG_DARK, corner_radius=0)
+2215:         shell.pack(fill='both', expand=True, padx=12, pady=10)
+2216:         self._preview_back_button(shell)
+2217:         box = ctk.CTkFrame(
+2218:             shell, fg_color=BG_CARD, border_width=1,
+2219:             border_color=BORDER_CARD, corner_radius=CARD_RADIUS)
+2220:         box.pack(fill='both', expand=True, pady=(8, 0))
+2221:         ctk.CTkLabel(
+2222:             box, text=T('preview_loading'), text_color=TEXT_DIM,
+2223:             font=(ui_font(), 14, 'bold')).pack(expand=True, pady=80)
+2224:         title = str((video or {}).get('title') or '')
+2225:         if title:
+2226:             ctk.CTkLabel(
+2227:                 box, text=title, text_color=TEXT_PRI,
+2228:                 font=(ui_font(), 16, 'bold'), wraplength=680,
+2229:                 justify='center').pack(pady=(0, 36), padx=24)
+2230: 
+2231:     def _preview_back_button(self, parent):
+2232:         row = ctk.CTkFrame(parent, fg_color='transparent')
+2233:         row.pack(fill='x')
+2234:         ctk.CTkButton(
+2235:             row, text='<  ' + T('preview_back'), width=128, height=30,
+2236:             fg_color='transparent', hover_color=BG_CARD_HOVER,
+2237:             text_color=TEXT_PRI, border_width=0,
+2238:             font=(ui_font(), 11, 'bold'),
+2239:             command=lambda: self._set_browse_mode('grid')).pack(side='left')
+2240:         return row
+2241: 
+2242:     def _apply_preview_source(self, gen: int, source):
+2243:         if self._is_closing or gen != self._preview_gen:
+2244:             return
+2245:         self._preview_source = source
+2246:         self._render_preview_detail(source)
+2247:         if getattr(self, '_status_lbl', None):
+2248:             self._status_lbl.configure(
+2249:                 text=T('preview_ready') if source.is_playable else T('preview_no_source'))
+2250: 
+2251:     def _render_preview_detail(self, source):
+2252:         self._clear_preview_area()
+2253:         area = self._preview_area
+2254:         shell = ctk.CTkFrame(area, fg_color=BG_DARK, corner_radius=0)
+2255:         shell.pack(fill='both', expand=True, padx=10, pady=8)
+2256:         self._preview_back_button(shell)
+2257: 
+2258:         body = ctk.CTkFrame(shell, fg_color='transparent')
+2259:         body.pack(fill='both', expand=True, pady=(8, 0))
+2260: 
+The above content does NOT show the entire file contents. If you need to view any lines of the file which were not shown to complete your task, call this tool again to view those lines.

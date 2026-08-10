@@ -1,0 +1,26 @@
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs and runtime artifacts
+*.log
+crash_log.txt
+crash_native.log
+startup.log
+build_tmp/
+
+# Download output & temporary directories
+download/
+.tempmediaStorage/
+.Jable_smalltool/
+scratch/
+JableTV-MissAV-Downloader-GUI-2026-master/
+
+# IDE & Editor settings
+.vscode/
+.idea/
+.DS_Store
