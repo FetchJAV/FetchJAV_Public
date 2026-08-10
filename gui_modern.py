@@ -2668,8 +2668,8 @@ class ModernApp(ctk.CTk):
         left_main = ctk.CTkFrame(split, fg_color='transparent')
         left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
-        # Right Sidebar Pane (Related Videos) - Width 370px with right margin to clear scrollbar
-        right_sidebar = ctk.CTkFrame(split, width=370, fg_color='transparent')
+        # Right Sidebar Pane (Related Videos) - Width 333px (reduced 10%) with right margin to clear scrollbar
+        right_sidebar = ctk.CTkFrame(split, width=333, fg_color='transparent')
         right_sidebar.pack(side='right', fill='y', anchor='n', padx=(0, 16))
 
         # ── 1. EMBEDDED VIDEO PLAYER FRAME ─────────────────────────────────
@@ -2940,7 +2940,7 @@ class ModernApp(ctk.CTk):
             rcard.pack(fill='x', padx=2, pady=6)
 
             # Top Preview Image Container (framed preview holder)
-            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=160, corner_radius=6)
+            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=145, corner_radius=6)
             rthumb_holder.pack(fill='x', padx=6, pady=(6, 0))
             rthumb_holder.pack_propagate(False)
 
@@ -2960,7 +2960,7 @@ class ModernApp(ctk.CTk):
 
             ctk.CTkLabel(
                 rinfo, text=r_title, text_color=TEXT_PRI,
-                font=(ui_font(), 10, 'bold'), wraplength=320, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
+                font=(ui_font(), 10, 'bold'), wraplength=285, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
 
             rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
             rbadges.pack(anchor='w')
