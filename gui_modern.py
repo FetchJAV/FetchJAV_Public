@@ -2930,15 +2930,18 @@ class ModernApp(ctk.CTk):
             r_title = rv.get('title', '')
             r_dur = rv.get('duration', '')
             r_thumb = rv.get('thumbnail', '')
+            r_is_sel = r_url in getattr(self, '_selected_urls', set())
 
             rcard = ctk.CTkFrame(
-                right_sidebar, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
-                border_width=1, border_color=BORDER_CARD)
+                right_sidebar, fg_color=ACCENT_DIM if r_is_sel else BG_CARD,
+                corner_radius=CARD_RADIUS,
+                border_width=2 if r_is_sel else 1,
+                border_color=ACCENT if r_is_sel else BORDER_CARD)
             rcard.pack(fill='x', padx=4, pady=6)
 
-            # Top Preview Image Container (original aspect ratio fit without zooming)
-            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=180, corner_radius=CARD_RADIUS)
-            rthumb_holder.pack(fill='x', padx=0, pady=(0, 6))
+            # Top Preview Image Container (framed inside card with padding like home page)
+            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=180, corner_radius=6)
+            rthumb_holder.pack(fill='x', padx=8, pady=(10, 0))
             rthumb_holder.pack_propagate(False)
 
             rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
@@ -2953,14 +2956,14 @@ class ModernApp(ctk.CTk):
 
             # Details Section (title neatly wrapped below the preview image)
             rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
-            rinfo.pack(fill='x', padx=10, pady=(0, 8))
+            rinfo.pack(fill='x', padx=10, pady=(10, 10))
 
             ctk.CTkLabel(
                 rinfo, text=r_title, text_color=TEXT_PRI,
-                font=(ui_font(), 11, 'bold'), wraplength=340, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
+                font=(ui_font(), 11, 'bold'), wraplength=340, justify='left').pack(anchor='w', fill='x', pady=(0, 6))
 
             rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
-            rbadges.pack(anchor='w', pady=(2, 0))
+            rbadges.pack(anchor='w')
 
             ctk.CTkLabel(
                 rbadges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
@@ -2972,9 +2975,20 @@ class ModernApp(ctk.CTk):
                 fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
                 font=(ui_font(), 9)).pack(side='left')
 
-            def _bind_rv(widget, item=rv):
+            def _bind_rv(widget, item=rv, frame=rcard, sel=r_is_sel):
                 widget.bind('<Button-1>', lambda e: self._open_preview(item))
                 widget.configure(cursor='hand2')
+                def _on_enter(e):
+                    if not sel:
+                        frame.configure(border_color=BORDER_HOVER)
+                def _on_leave(e):
+                    if not sel:
+                        frame.configure(border_color=BORDER_CARD)
+                try:
+                    widget.bind('<Enter>', _on_enter, add='+')
+                    widget.bind('<Leave>', _on_leave, add='+')
+                except Exception:
+                    pass
 
             _bind_rv(rcard)
             _bind_rv(rthumb_holder)
