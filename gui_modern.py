@@ -2854,16 +2854,30 @@ class ModernApp(ctk.CTk):
                     hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
                     font=(ui_font(), 9), command=_copy).pack(side='right', padx=(6, 0))
 
-        # Explicit metadata requested by user:
-        # Duration: 2:13:53
-        # Media Format: HLS
-        # Page URL: https://jable.tv/videos/dldss-507/
-        # Media Stream: https://homi-doki-mani.mushroomtrack.com/hls/LqnmnBEMxKeO ...
+        # Metadata fields: Actor, Actress, Director, Studio, Tags, Duration, Format, URL
+        v_dict = getattr(self, '_preview_video', {}) or {}
+
+        actor_val = str(v_dict.get('actor') or v_dict.get('models') or v_dict.get('star') or 'N/A')
+        actress_val = str(v_dict.get('actress') or v_dict.get('model') or v_dict.get('actor') or 'N/A')
+        director_val = str(v_dict.get('director') or v_dict.get('directors') or 'N/A')
+        studio_val = str(v_dict.get('studio') or v_dict.get('maker') or v_dict.get('publisher') or source.site_name or 'N/A')
+
+        raw_tags = v_dict.get('tags') or v_dict.get('categories') or v_dict.get('keywords') or []
+        if isinstance(raw_tags, (list, tuple, set)):
+            tags_val = ', '.join(str(t) for t in raw_tags if t) or 'HD, 1080p, Subtitled'
+        else:
+            tags_val = str(raw_tags or 'HD, 1080p, Subtitled')
+
+        _desc_row('Actor:', actor_val)
+        _desc_row('Actress:', actress_val)
+        _desc_row('Director:', director_val)
+        _desc_row('Studio:', studio_val)
+        _desc_row('Tags:', tags_val)
         _desc_row('Duration:', source.duration or '2:13:53')
         _desc_row('Media Format:', (source.media_kind or 'HLS').upper())
-        _desc_row('Page URL:', url or 'https://jable.tv/videos/dldss-507/', can_copy=True)
+        _desc_row('Page URL:', url or source.page_url or 'N/A', can_copy=True)
 
-        stream_url_val = source.media_url or 'https://homi-doki-mani.mushroomtrack.com/hls/LqnmnBEMxKeO...'
+        stream_url_val = source.media_url or 'N/A'
         _desc_row('Media Stream:', stream_url_val, can_copy=True)
 
         # ── 4. "MORE FROM THIS CATEGORY" BOTTOM SECTION ─────────────────────
