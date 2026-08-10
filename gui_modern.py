@@ -1467,8 +1467,21 @@ class ModernApp(ctk.CTk):
         if width <= 1:
             width = 1280
 
-        is_compact_header = width < 980
+        # Base mathematical threshold: when window width < 850px, Settings text reaches the right controls
+        is_compact_header = width < 850
         is_compact_sidebar = width < 880
+
+        # Runtime position check: if right_info left edge is near the centered tab_nav right edge with text
+        try:
+            tab_nav = getattr(self, '_tab_nav_frame', None)
+            right_info = getattr(self, '_right_info_frame', None)
+            if tab_nav and right_info and tab_nav.winfo_exists() and right_info.winfo_exists():
+                rx = right_info.winfo_x()
+                if rx > 300:
+                    if rx <= (width / 2) + 190:
+                        is_compact_header = True
+        except Exception:
+            pass
 
         tab_labels = {'browse': T('tab_browse'), 'download': T('tab_download'), 'settings': T('tab_settings')}
 
@@ -1903,6 +1916,7 @@ class ModernApp(ctk.CTk):
 
         tab_nav = ctk.CTkFrame(header, fg_color='transparent')
         tab_nav.place(relx=0.5, rely=0.5, anchor='center')
+        self._tab_nav_frame = tab_nav
 
         self._tab_buttons = {}
         for idx, key in enumerate(self._tab_keys):
@@ -1940,6 +1954,7 @@ class ModernApp(ctk.CTk):
         # Right info container flush on the right side of header line
         right_info = ctk.CTkFrame(header, fg_color='transparent')
         right_info.pack(side='right', padx=16, fill='y')
+        self._right_info_frame = right_info
 
         icon_obj_theme = self._get_theme_icon()
         self._theme_btn = ctk.CTkButton(
