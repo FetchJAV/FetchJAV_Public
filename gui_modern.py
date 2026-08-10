@@ -833,6 +833,23 @@ def _thumbnail_request_context(url: str, site_key: str = ''):
     return request_headers, cookies
 
 
+def _fit_image(img: Image.Image, target_w: int, target_h: int) -> tuple[Image.Image, int, int]:
+    """Scale img so the COMPLETE image fits inside target_w x target_h without cropping or zooming in."""
+    if not img or target_w <= 1 or target_h <= 1:
+        return img, max(1, target_w), max(1, target_h)
+    iw, ih = img.size
+    if iw <= 0 or ih <= 0:
+        return img, max(1, target_w), max(1, target_h)
+    scale = min(target_w / iw, target_h / ih)
+    nw = max(1, int(round(iw * scale)))
+    nh = max(1, int(round(ih * scale)))
+    if (nw, nh) != (iw, ih):
+        img_scaled = img.resize((nw, nh), Image.LANCZOS)
+    else:
+        img_scaled = img
+    return img_scaled, nw, nh
+
+
 def _fetch_thumbnail(url: str, site_key: str = '') -> Optional[Image.Image]:
     """Download and decode a thumbnail; cached per-URL."""
     if not url:
@@ -1074,11 +1091,31 @@ class ModernApp(ctk.CTk):
                     dark_image=Image.open(t_dark_p),
                     size=(18, 18)
                 )
+
+            h_p = os.path.join(img_dir_dest, 'icon_heart_white.png')
+            if os.path.exists(h_p):
+                self._heart_icon = ctk.CTkImage(
+                    light_image=Image.open(h_p), dark_image=Image.open(h_p),
+                    size=(16, 16)
+                )
+            p_p = os.path.join(img_dir_dest, 'icon_plus_white.png')
+            if os.path.exists(p_p):
+                self._plus_icon = ctk.CTkImage(
+                    light_image=Image.open(p_p), dark_image=Image.open(p_p),
+                    size=(14, 14)
+                )
+            d_p = os.path.join(img_dir_dest, 'icon_dl_white.png')
+            if os.path.exists(d_p):
+                self._dl_icon = ctk.CTkImage(
+                    light_image=Image.open(d_p), dark_image=Image.open(d_p),
+                    size=(14, 14)
+                )
         except Exception:
             pass
 
         self._build_ui()
         self.bind('<Configure>', self._on_root_resize, add='+')
+        self.bind_all('<Key>', self._on_global_player_key, add='+')
         self.protocol('WM_DELETE_WINDOW', self._on_close)
         # Start periodic refresh for downloads
         self._refresh_downloads()
@@ -2011,17 +2048,17 @@ class ModernApp(ctk.CTk):
 
         # ── Inline Compact Status & Navigation Bar ──────────────────
         ctk.CTkFrame(self, height=1, fg_color=BORDER, corner_radius=0).pack(fill='x')
-        status_bar = ctk.CTkFrame(self, height=32, fg_color=BG_HEADER, corner_radius=0)
-        status_bar.pack(fill='x')
-        status_bar.pack_propagate(False)
+        self._status_bar = ctk.CTkFrame(self, height=32, fg_color=BG_HEADER, corner_radius=0)
+        self._status_bar.pack(fill='x')
+        self._status_bar.pack_propagate(False)
 
-        self._status_lbl = ctk.CTkLabel(status_bar, text=T('status_ready'),
+        self._status_lbl = ctk.CTkLabel(self._status_bar, text=T('status_ready'),
                                          font=('Consolas', 10),
                                          text_color=TEXT_SEC)
         self._status_lbl.pack(side='left', padx=16)
 
         # Inline page navigation container (packed on right side of status bar)
-        self._page_nav_box = ctk.CTkFrame(status_bar, fg_color='transparent')
+        self._page_nav_box = ctk.CTkFrame(self._status_bar, fg_color='transparent')
         self._page_nav_box.pack(side='right', padx=12)
 
         self._b_first = ctk.CTkButton(self._page_nav_box, text=T('first_page'), width=44, height=24,
@@ -2244,12 +2281,15 @@ class ModernApp(ctk.CTk):
         preview_area = getattr(self, '_preview_area', None)
         sidebar = getattr(self, '_sidebar', None)
         workspace = getattr(self, '_browse_workspace', None)
+        status_bar = getattr(self, '_status_bar', None)
         if not grid_area or not preview_area:
             return
         try:
             if mode == 'preview':
                 if sidebar:
                     sidebar.pack_forget()
+                if status_bar:
+                    status_bar.pack_forget()
                 grid_area.pack_forget()
                 preview_area.pack(fill='both', expand=True)
             else:
@@ -2257,6 +2297,8 @@ class ModernApp(ctk.CTk):
                 preview_area.pack_forget()
                 if sidebar and workspace:
                     sidebar.pack(side='left', fill='y', before=workspace)
+                if status_bar:
+                    status_bar.pack(fill='x')
                 grid_area.pack(fill='both', expand=True)
         except tk.TclError:
             return
@@ -2398,6 +2440,125 @@ class ModernApp(ctk.CTk):
                 target_ms = int(float(value) * length_ms)
                 player.set_time(target_ms)
 
+    def _on_global_player_key(self, event):
+        if getattr(self, '_browse_mode', '') != 'preview':
+            return
+        if not getattr(self, '_is_mouse_over_player', False):
+            return
+
+        keysym = str(getattr(event, 'keysym', '') or '').lower()
+        if keysym in ('space', 'k'):
+            self._on_player_space()
+            return 'break'
+        elif keysym in ('right', 'l'):
+            self._on_player_right()
+            return 'break'
+        elif keysym in ('left', 'j'):
+            self._on_player_left()
+            return 'break'
+        elif keysym in ('up', 'volumeup'):
+            self._on_player_up()
+            return 'break'
+        elif keysym in ('down', 'volumedown'):
+            self._on_player_down()
+            return 'break'
+
+    def _on_player_space(self, event=None):
+        player = getattr(self, '_preview_player', None)
+        if player:
+            if player.is_playing():
+                player.pause()
+            else:
+                player.play()
+            return
+        web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
+        if web_frame:
+            try:
+                web_frame.run_js("var v=document.getElementById('player');if(v){v.paused?v.play():v.pause();}")
+            except Exception:
+                pass
+
+    def _on_player_right(self, event=None):
+        player = getattr(self, '_preview_player', None)
+        if player:
+            time_ms = player.get_time()
+            if time_ms >= 0:
+                player.set_time(time_ms + 10000)
+            return
+        web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
+        if web_frame:
+            try:
+                web_frame.run_js("var v=document.getElementById('player');if(v){v.currentTime+=10;}")
+            except Exception:
+                pass
+
+    def _on_player_left(self, event=None):
+        player = getattr(self, '_preview_player', None)
+        if player:
+            time_ms = player.get_time()
+            if time_ms >= 0:
+                player.set_time(max(0, time_ms - 10000))
+            return
+        web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
+        if web_frame:
+            try:
+                web_frame.run_js("var v=document.getElementById('player');if(v){v.currentTime=Math.max(0,v.currentTime-10);}")
+            except Exception:
+                pass
+
+    def _on_player_up(self, event=None):
+        player = getattr(self, '_preview_player', None)
+        if player:
+            vol = player.audio_get_volume()
+            new_vol = min(100, (vol if vol >= 0 else 50) + 10)
+            player.audio_set_volume(new_vol)
+            slider = getattr(self, '_player_vol_slider', None)
+            if slider:
+                slider.set(new_vol / 100.0)
+            return
+        web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
+        if web_frame:
+            try:
+                web_frame.run_js("var v=document.getElementById('player');if(v){v.volume=Math.min(1.0,v.volume+0.1);}")
+            except Exception:
+                pass
+
+    def _on_player_down(self, event=None):
+        player = getattr(self, '_preview_player', None)
+        if player:
+            vol = player.audio_get_volume()
+            new_vol = max(0, (vol if vol >= 0 else 50) - 10)
+            player.audio_set_volume(new_vol)
+            slider = getattr(self, '_player_vol_slider', None)
+            if slider:
+                slider.set(new_vol / 100.0)
+            return
+        web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
+        if web_frame:
+            try:
+                web_frame.run_js("var v=document.getElementById('player');if(v){v.volume=Math.max(0.0,v.volume-0.1);}")
+            except Exception:
+                pass
+
+    def _bind_player_keyboard_controls(self, widget):
+        def _on_enter(e):
+            self._is_mouse_over_player = True
+
+        def _on_leave(e):
+            self._is_mouse_over_player = False
+
+        try:
+            widget.bind('<Enter>', _on_enter, add='+')
+            widget.bind('<Leave>', _on_leave, add='+')
+            for child in widget.winfo_children():
+                try:
+                    child.bind('<Enter>', _on_enter, add='+')
+                    child.bind('<Leave>', _on_leave, add='+')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _on_player_volume(self, value):
         player = getattr(self, '_preview_player', None)
         if player:
@@ -2493,41 +2654,32 @@ class ModernApp(ctk.CTk):
         shell = ctk.CTkFrame(area, fg_color=BG_DARK, corner_radius=0)
         shell.pack(fill='both', expand=True, padx=12, pady=10)
 
-        # Top Bar: ← Back to Home / Back to Browse
-        top_bar = ctk.CTkFrame(shell, fg_color='transparent')
-        top_bar.pack(fill='x', pady=(0, 8))
-        ctk.CTkButton(
-            top_bar, text='←  ' + T('preview_back'), width=140, height=32,
-            fg_color='transparent', hover_color=BG_CARD_HOVER,
-            text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
-            corner_radius=CONTROL_RADIUS,
-            font=(ui_font(), 11, 'bold'),
-            command=lambda: self._set_browse_mode('grid')).pack(side='left')
+        # Single Scroll Container: video player & related videos scroll together using one scroll bar
+        main_scroll = ctk.CTkScrollableFrame(
+            shell, fg_color=BG_DARK, corner_radius=0,
+            scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=BORDER_HOVER)
+        main_scroll.pack(fill='both', expand=True)
 
-        # Split Container: Left Main (Player + Info + Bottom Category Cards), Right Sidebar (Related Videos)
-        split = ctk.CTkFrame(shell, fg_color='transparent')
+        split = ctk.CTkFrame(main_scroll, fg_color='transparent')
         split.pack(fill='both', expand=True)
 
-        # Left Main Pane
-        left_main = ctk.CTkScrollableFrame(
-            split, fg_color=BG_DARK, corner_radius=0,
-            scrollbar_button_color=BORDER,
-            scrollbar_button_hover_color=BORDER_HOVER)
-        left_main.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        # Left Main Pane (Video Player + Info + Bottom Category Cards)
+        left_main = ctk.CTkFrame(split, fg_color='transparent')
+        left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
-        # Right Sidebar Pane (Related Videos)
-        right_sidebar = ctk.CTkScrollableFrame(
-            split, width=320, fg_color=BG_DARK, corner_radius=0,
-            scrollbar_button_color=BORDER,
-            scrollbar_button_hover_color=BORDER_HOVER)
-        right_sidebar.pack(side='right', fill='y', padx=(0, 0))
+        # Right Sidebar Pane (Related Videos) - Width 440px
+        right_sidebar = ctk.CTkFrame(split, width=440, fg_color='transparent')
+        right_sidebar.pack(side='right', fill='y', anchor='n', padx=(0, 4))
 
         # ── 1. EMBEDDED VIDEO PLAYER FRAME ─────────────────────────────────
         player_container = ctk.CTkFrame(
             left_main, fg_color='#000000', corner_radius=CARD_RADIUS,
-            border_width=1, border_color=BORDER_CARD, height=420)
+            border_width=1, border_color=BORDER_CARD, height=560)
         player_container.pack(fill='x', pady=(0, 12))
         player_container.pack_propagate(False)
+        self._player_container_ref = player_container
+        self._bind_player_keyboard_controls(player_container)
 
         # Canvas for VLC embedding
         canvas = tk.Canvas(player_container, bg='#000000', highlightthickness=0)
@@ -2567,6 +2719,8 @@ class ModernApp(ctk.CTk):
         # Start in-app VLC player if stream is playable
         if source.is_playable:
             self._init_vlc_player(source.media_url, source.headers, canvas)
+            self._bind_player_keyboard_controls(player_container)
+            self._bind_player_keyboard_controls(canvas)
         else:
             ctk.CTkLabel(
                 canvas, text=source.error or T('preview_no_source'),
@@ -2623,29 +2777,40 @@ class ModernApp(ctk.CTk):
                 self._toggle_select(url)
             self._start_selected_downloads()
 
+        # Heart button with SVG heart icon
         ctk.CTkButton(
-            actions_right, text='♡', width=34, height=32,
+            actions_right, text='' if getattr(self, '_heart_icon', None) else '♡',
+            image=getattr(self, '_heart_icon', None),
+            width=34, height=32,
             corner_radius=CONTROL_RADIUS, fg_color='transparent',
             border_width=1, border_color=BORDER_HOVER,
             hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-            font=(ui_font(), 14)).pack(side='left', padx=(0, 6))
+            command=lambda: None
+        ).pack(side='left', padx=(0, 6))
 
+        # Reduced width Add to Queue button with SVG plus icon
+        sel_text = T('preview_in_download') if is_sel else T('add_to_queue')
         ctk.CTkButton(
-            actions_right, text=sel_text, height=32,
+            actions_right, text=' ' + sel_text, height=32, width=96,
+            image=getattr(self, '_plus_icon', None),
             corner_radius=CONTROL_RADIUS,
             fg_color=ACCENT if is_sel else 'transparent',
             border_width=0 if is_sel else 1, border_color=BORDER_HOVER,
             hover_color=ACCENT_HOVER if is_sel else BG_CARD_HOVER,
             text_color=WHITE if is_sel else TEXT_PRI,
-            font=(ui_font(), 11, 'bold') if is_sel else (ui_font(), 11),
-            command=_toggle_q).pack(side='left', padx=(0, 6))
+            font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10),
+            command=_toggle_q
+        ).pack(side='left', padx=(0, 6))
 
+        # Reduced width Download button with SVG download icon
         ctk.CTkButton(
-            actions_right, text='⤓ ' + T('download_btn'), height=32,
+            actions_right, text=' ' + T('download_btn'), height=32, width=92,
+            image=getattr(self, '_dl_icon', None),
             corner_radius=CONTROL_RADIUS, fg_color=ACCENT,
             hover_color=ACCENT_HOVER, text_color=WHITE,
-            font=(ui_font(), 11, 'bold'),
-            command=_direct_dl).pack(side='left')
+            font=(ui_font(), 10, 'bold'),
+            command=_direct_dl
+        ).pack(side='left')
 
         # ── 3. INFO & DESCRIPTION PANE ──────────────────────────────────────
         info_card = ctk.CTkFrame(
@@ -2729,7 +2894,7 @@ class ModernApp(ctk.CTk):
             v_thumb_holder.pack_propagate(False)
 
             v_lbl = ctk.CTkLabel(v_thumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
-            v_lbl.pack(expand=True)
+            v_lbl.pack(fill='both', expand=True)
             if v_thumb:
                 self._load_thumb_async(v_thumb, v_lbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
 
@@ -2779,7 +2944,7 @@ class ModernApp(ctk.CTk):
             rthumb_holder.pack_propagate(False)
 
             rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
-            rlbl.pack(expand=True)
+            rlbl.pack(fill='both', expand=True)
             if r_thumb:
                 self._load_thumb_async(r_thumb, rlbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
 
@@ -3629,14 +3794,14 @@ class ModernApp(ctk.CTk):
 
             # Thumbnail placeholder (16:9)
             thumb_holder = ctk.CTkFrame(card, fg_color=BG_SIDEBAR,
-                                         height=_THUMB_SIZE[1], corner_radius=6)
-            thumb_holder.pack(fill='x', padx=8, pady=(8, 0))
+                                         height=_THUMB_SIZE[1] + 11, corner_radius=6)
+            thumb_holder.pack(fill='x', padx=8, pady=(10, 0))
             thumb_holder.pack_propagate(False)
             thumb_lbl = ctk.CTkLabel(thumb_holder, text=T('loading_browse'),
                                       text_color=TEXT_DIM,
                                       fg_color='transparent',
                                       font=(ui_font(), 11))
-            thumb_lbl.pack(expand=True)
+            thumb_lbl.pack(fill='both', expand=True)
 
             # Duration badge
             if dur:
@@ -3652,28 +3817,15 @@ class ModernApp(ctk.CTk):
             ctk.CTkLabel(card, text=title_text, text_color=TEXT_PRI,
                          font=(ui_font(), 10),
                          wraplength=title_wrap, justify='left').pack(
-                             fill='x', padx=10, pady=(6, 8), anchor='w')
+                             fill='x', padx=10, pady=(10, 12), anchor='w')
 
             # Bottom row
             bottom = ctk.CTkFrame(card, fg_color='transparent')
-            bottom.pack(fill='x', padx=8, pady=(0, 8))
-
-            preview_btn = ctk.CTkButton(
-                bottom, text=T('preview'), height=30,
-                corner_radius=CONTROL_RADIUS,
-                fg_color='transparent',
-                border_width=1,
-                border_color=BORDER_HOVER,
-                hover_color=BG_CARD_HOVER,
-                text_color=TEXT_PRI,
-                font=(ui_font(), 10),
-                command=lambda video=v: self._open_preview(video)
-            )
-            preview_btn.pack(side='left', fill='x', expand=True, padx=(0, 3))
+            bottom.pack(fill='x', padx=8, pady=(4, 12))
 
             sel_text = ('✓ ' + T('selected')) if is_sel else T('select')
             sel_btn = ctk.CTkButton(
-                bottom, text=sel_text, height=30,
+                bottom, text=sel_text, height=27, width=88,
                 corner_radius=CONTROL_RADIUS,
                 fg_color=ACCENT if is_sel else 'transparent',
                 border_width=0 if is_sel else 1,
@@ -3683,7 +3835,20 @@ class ModernApp(ctk.CTk):
                 font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10),
                 command=lambda u=url: self._toggle_select(u)
             )
-            sel_btn.pack(side='right', fill='x', expand=True, padx=(3, 0))
+            sel_btn.pack(side='right', padx=(4, 0))
+
+            preview_btn = ctk.CTkButton(
+                bottom, text=T('preview'), height=27, width=75,
+                corner_radius=CONTROL_RADIUS,
+                fg_color='transparent',
+                border_width=1,
+                border_color=BORDER_HOVER,
+                hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI,
+                font=(ui_font(), 10),
+                command=lambda video=v: self._open_preview(video)
+            )
+            preview_btn.pack(side='right', padx=(0, 4))
 
             self._card_widgets[url] = {'card': card, 'sel_btn': sel_btn, 'preview_btn': preview_btn}
 
@@ -3730,11 +3895,37 @@ class ModernApp(ctk.CTk):
                 try:
                     if not label.winfo_exists():
                         return
-                    ctk_img = ctk.CTkImage(light_image=img, dark_image=img,
-                                            size=img.size)
+                    holder = label.master
+                    cw = max(holder.winfo_width(), 100) if (holder and holder.winfo_exists()) else 300
+                    ch = max(holder.winfo_height(), 50) if (holder and holder.winfo_exists()) else 180
+                    if cw <= 1:
+                        cw = 300
+                    if ch <= 1:
+                        ch = 180
+                    label._raw_img = img
+                    label._last_w = cw
+                    label._last_h = ch
+                    fitted_img, nw, nh = _fit_image(img, cw, ch)
+                    ctk_img = ctk.CTkImage(light_image=fitted_img, dark_image=fitted_img, size=(nw, nh))
                     label.configure(image=ctk_img, text='')
-                    # Keep a reference on the widget so GC doesn't reclaim it
                     label._ctk_img_ref = ctk_img
+
+                    if not getattr(label, '_has_resize_bind', False) and holder and holder.winfo_exists():
+                        label._has_resize_bind = True
+                        def _on_resize(event):
+                            if not label.winfo_exists():
+                                return
+                            w, h = event.width, event.height
+                            if w > 10 and h > 10 and (getattr(label, '_last_w', 0) != w or getattr(label, '_last_h', 0) != h):
+                                label._last_w = w
+                                label._last_h = h
+                                raw = getattr(label, '_raw_img', None)
+                                if raw:
+                                    f_img, fw, fh = _fit_image(raw, w, h)
+                                    ci = ctk.CTkImage(light_image=f_img, dark_image=f_img, size=(fw, fh))
+                                    label.configure(image=ci)
+                                    label._ctk_img_ref = ci
+                        holder.bind('<Configure>', _on_resize, add='+')
                 except Exception:
                     pass
             self._ui(_apply, gen=build_gen)
