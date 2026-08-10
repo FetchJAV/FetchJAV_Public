@@ -834,13 +834,13 @@ def _thumbnail_request_context(url: str, site_key: str = ''):
 
 
 def _fit_image(img: Image.Image, target_w: int, target_h: int) -> tuple[Image.Image, int, int]:
-    """Scale img so the COMPLETE image fits inside target_w x target_h without cropping or zooming in."""
+    """Scale img so the COMPLETE image fits inside target_w x target_h without cropping or zooming in beyond original size."""
     if not img or target_w <= 1 or target_h <= 1:
         return img, max(1, target_w), max(1, target_h)
     iw, ih = img.size
     if iw <= 0 or ih <= 0:
         return img, max(1, target_w), max(1, target_h)
-    scale = min(target_w / iw, target_h / ih)
+    scale = min(1.0, target_w / iw, target_h / ih)
     nw = max(1, int(round(iw * scale)))
     nh = max(1, int(round(ih * scale)))
     if (nw, nh) != (iw, ih):
