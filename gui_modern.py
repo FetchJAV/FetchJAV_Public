@@ -1467,7 +1467,7 @@ class ModernApp(ctk.CTk):
         if width <= 1:
             width = 1280
 
-        is_compact_header = width < 960
+        is_compact_header = width < 980
         is_compact_sidebar = width < 880
 
         tab_labels = {'browse': T('tab_browse'), 'download': T('tab_download'), 'settings': T('tab_settings')}
@@ -1902,7 +1902,7 @@ class ModernApp(ctk.CTk):
                 pass
 
         tab_nav = ctk.CTkFrame(header, fg_color='transparent')
-        tab_nav.pack(side='left', padx=(24, 0), fill='y')
+        tab_nav.place(relx=0.5, rely=0.5, anchor='center')
 
         self._tab_buttons = {}
         for idx, key in enumerate(self._tab_keys):
