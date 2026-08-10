@@ -2934,13 +2934,11 @@ class ModernApp(ctk.CTk):
             rcard = ctk.CTkFrame(
                 right_sidebar, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
                 border_width=1, border_color=BORDER_CARD)
-            rcard.pack(fill='x', padx=6, pady=4)
+            rcard.pack(fill='x', padx=6, pady=8)
 
-            rcontent = ctk.CTkFrame(rcard, fg_color='transparent')
-            rcontent.pack(fill='x', padx=8, pady=8)
-
-            rthumb_holder = ctk.CTkFrame(rcontent, fg_color=BG_SIDEBAR, width=120, height=68, corner_radius=6)
-            rthumb_holder.pack(side='left', padx=(0, 10))
+            # Large Top Preview Image (full width of sidebar card, 210px height)
+            rthumb_holder = ctk.CTkFrame(rcard, fg_color=BG_SIDEBAR, height=210, corner_radius=CARD_RADIUS)
+            rthumb_holder.pack(fill='x', padx=0, pady=(0, 8))
             rthumb_holder.pack_propagate(False)
 
             rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
@@ -2951,35 +2949,34 @@ class ModernApp(ctk.CTk):
             if r_dur:
                 ctk.CTkLabel(
                     rthumb_holder, text=f' {r_dur} ', text_color=WHITE, fg_color='#000000',
-                    corner_radius=3, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
+                    corner_radius=4, font=('Consolas', 9, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-8, y=-8)
 
-            rinfo = ctk.CTkFrame(rcontent, fg_color='transparent')
-            rinfo.pack(side='left', fill='both', expand=True)
+            # Details Section (title and tags below the preview image)
+            rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
+            rinfo.pack(fill='x', padx=12, pady=(0, 10))
 
-            rt_short = r_title[:42] + '...' if len(r_title) > 42 else r_title
             ctk.CTkLabel(
-                rinfo, text=rt_short, text_color=TEXT_PRI,
-                font=(ui_font(), 10, 'bold'), wraplength=160, justify='left').pack(anchor='w', pady=(0, 4))
+                rinfo, text=r_title, text_color=TEXT_PRI,
+                font=(ui_font(), 11, 'bold'), wraplength=400, justify='left').pack(anchor='w', pady=(0, 6))
 
             rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
             rbadges.pack(anchor='w')
 
             ctk.CTkLabel(
                 rbadges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
-                fg_color=BG_SIDEBAR, corner_radius=3, height=16, padx=4,
-                font=(ui_font(), 8, 'bold')).pack(side='left', padx=(0, 4))
+                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
+                font=(ui_font(), 9, 'bold')).pack(side='left', padx=(0, 6))
 
             ctk.CTkLabel(
                 rbadges, text='1080p', text_color=TEXT_DIM,
-                fg_color=BG_SIDEBAR, corner_radius=3, height=16, padx=4,
-                font=(ui_font(), 8)).pack(side='left')
+                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
+                font=(ui_font(), 9)).pack(side='left')
 
             def _bind_rv(widget, item=rv):
                 widget.bind('<Button-1>', lambda e: self._open_preview(item))
                 widget.configure(cursor='hand2')
 
             _bind_rv(rcard)
-            _bind_rv(rcontent)
             _bind_rv(rthumb_holder)
             _bind_rv(rlbl)
             _bind_rv(rinfo)
