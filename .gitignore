@@ -1,0 +1,9 @@
+.vscode/
+build_tmp/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.DS_Store
+*.log
