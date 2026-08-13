@@ -50,11 +50,13 @@ def color_for_mode(token, mode='dark'):
 def browse_columns_for_width(width):
     """Readable browse-card density for the root window width."""
     width = max(0, int(width or 0))
-    if width >= 1500:
+    if width >= 1400:
         return 4
-    if width >= 1080:
+    if width >= 750:
         return 3
-    return 2
+    if width >= 480:
+        return 2
+    return 1
 
 
 def category_columns_for_width(width):

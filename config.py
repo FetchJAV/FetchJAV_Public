@@ -99,6 +99,26 @@ def set_theme(mode):
         pass
 
 
+def get_accent_color():
+    color = _load_prefs().get('accent_color')
+    if isinstance(color, str) and re.fullmatch(r'#[0-9A-Fa-f]{6}', color):
+        return color
+    return None
+
+
+def set_accent_color(hex_color):
+    hex_color = (hex_color or '').strip()
+    if not re.fullmatch(r'#[0-9A-Fa-f]{6}', hex_color):
+        return
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['accent_color'] = hex_color.upper()
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
 def get_ui_lang():
     code = _load_prefs().get('lang')
     if isinstance(code, str):
@@ -636,3 +656,228 @@ try:
     load_cf_overrides()
 except Exception:
     pass
+
+
+def get_saved_videos():
+    try:
+        with _prefs_lock:
+            saved = _load_prefs().get('saved_videos', [])
+            if isinstance(saved, list):
+                return list(saved)
+    except Exception:
+        pass
+    return []
+
+
+def is_video_saved(url):
+    url = (url or '').strip()
+    if not url:
+        return False
+    saved = get_saved_videos()
+    return any(isinstance(item, dict) and item.get('url') == url for item in saved)
+
+
+def add_saved_video(video_info: dict):
+    url = (video_info.get('url') or video_info.get('page_url') or '').strip()
+    if not url:
+        return False
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            saved = prefs.get('saved_videos', [])
+            if not isinstance(saved, list):
+                saved = []
+
+            existing_idx = -1
+            for i, item in enumerate(saved):
+                if isinstance(item, dict) and item.get('url') == url:
+                    existing_idx = i
+                    break
+
+            entry = {
+                'url': url,
+                'title': video_info.get('title') or url,
+                'thumbnail': video_info.get('thumbnail') or video_info.get('img') or '',
+                'duration': video_info.get('duration') or '',
+                'site_name': video_info.get('site_name') or '',
+            }
+            if existing_idx >= 0:
+                saved[existing_idx] = entry
+            else:
+                saved.insert(0, entry)
+            prefs['saved_videos'] = saved
+            _save_prefs(prefs)
+            return True
+    except Exception:
+        return False
+
+
+def remove_saved_video(url: str):
+    url = (url or '').strip()
+    if not url:
+        return False
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            saved = prefs.get('saved_videos', [])
+            if not isinstance(saved, list):
+                return False
+            new_saved = [item for item in saved if isinstance(item, dict) and item.get('url') != url]
+            prefs['saved_videos'] = new_saved
+            _save_prefs(prefs)
+            return True
+    except Exception:
+        return False
+
+
+def toggle_saved_video(video_info: dict) -> bool:
+    url = (video_info.get('url') or video_info.get('page_url') or '').strip()
+    if not url:
+        return False
+    if is_video_saved(url):
+        remove_saved_video(url)
+        return False
+    else:
+        add_saved_video(video_info)
+        return True
+
+
+def clear_saved_videos():
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['saved_videos'] = []
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def get_view_history():
+    try:
+        with _prefs_lock:
+            h = _load_prefs().get('view_history', [])
+            if isinstance(h, list):
+                return list(h)
+    except Exception:
+        pass
+    return []
+
+
+def add_view_history(video):
+    if not isinstance(video, dict):
+        return
+    url = (video.get('url') or video.get('page_url') or '').strip()
+    if not url:
+        return
+    title = video.get('title') or url
+    thumb = video.get('thumbnail') or video.get('img') or ''
+    dur = video.get('duration') or ''
+    site = video.get('site_name') or site_name_from_url(url)
+    import time
+    entry = {
+        'url': url,
+        'title': title,
+        'thumbnail': thumb,
+        'duration': dur,
+        'site_name': site,
+        'timestamp': int(time.time()),
+    }
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            hist = prefs.get('view_history', [])
+            if not isinstance(hist, list):
+                hist = []
+            hist = [item for item in hist if isinstance(item, dict) and item.get('url') != url]
+            hist.insert(0, entry)
+            prefs['view_history'] = hist[:100]
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def clear_view_history():
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['view_history'] = []
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def remove_view_history(url):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            hist = prefs.get('view_history', [])
+            if isinstance(hist, list):
+                prefs['view_history'] = [item for item in hist if isinstance(item, dict) and item.get('url') != url]
+                _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def get_download_history():
+    try:
+        with _prefs_lock:
+            h = _load_prefs().get('download_history', [])
+            if isinstance(h, list):
+                return list(h)
+    except Exception:
+        pass
+    return []
+
+
+def add_download_history(item):
+    if not isinstance(item, dict):
+        return
+    url = (item.get('url') or '').strip()
+    if not url:
+        return
+    name = item.get('name') or item.get('title') or url
+    state = item.get('state') or '已下載'
+    dest = item.get('dest') or ''
+    import time
+    entry = {
+        'url': url,
+        'name': name,
+        'state': state,
+        'dest': dest,
+        'timestamp': int(time.time()),
+    }
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            hist = prefs.get('download_history', [])
+            if not isinstance(hist, list):
+                hist = []
+            hist = [i for i in hist if isinstance(i, dict) and i.get('url') != url]
+            hist.insert(0, entry)
+            prefs['download_history'] = hist[:100]
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def clear_download_history():
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['download_history'] = []
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def remove_download_history(url):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            hist = prefs.get('download_history', [])
+            if isinstance(hist, list):
+                prefs['download_history'] = [i for i in hist if isinstance(i, dict) and i.get('url') != url]
+                _save_prefs(prefs)
+    except Exception:
+        pass
+

@@ -134,6 +134,54 @@ HARD_LOAD_LIMIT = 5000
 CSV_PATH = config.queue_csv_path()
 ERR_BLOCKED = '__cf_blocked__'
 
+
+def _hex_to_rgb(h):
+    h = (h or '').lstrip('#')
+    if len(h) != 6:
+        return (0, 0, 0)
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(rgb):
+    return '#%02X%02X%02X' % rgb
+
+
+def _brighten(hex_color, factor=1.2):
+    r, g, b = _hex_to_rgb(hex_color)
+    r = min(255, int(r * factor))
+    g = min(255, int(g * factor))
+    b = min(255, int(b * factor))
+    return _rgb_to_hex((r, g, b))
+
+
+def _dim_color(hex_color, bg_hex, alpha=0.12):
+    fr, fg, fb = _hex_to_rgb(hex_color)
+    br, bg, bb = _hex_to_rgb(bg_hex)
+    r = int(fr * (1 - alpha) + br * alpha)
+    g = int(fg * (1 - alpha) + bg * alpha)
+    b = int(fb * (1 - alpha) + bb * alpha)
+    return _rgb_to_hex((r, g, b))
+
+
+def apply_accent_color(hex_color):
+    import ui_theme as _ui_theme
+    import gui_modern as _gm
+    light = hex_color
+    dark = _brighten(hex_color, 1.15)
+    _ui_theme.ACCENT = (light, dark)
+    _ui_theme.ACCENT_HOVER = (_brighten(light, 0.92), _brighten(dark, 0.92))
+    _ui_theme.ACCENT_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
+    _ui_theme.TEXT_LINK = (light, dark)
+    _ui_theme.ERROR_C = (light, dark)
+    _ui_theme.ERROR_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
+    _gm.ACCENT = (light, dark)
+    _gm.ACCENT_HOVER = (_brighten(light, 0.92), _brighten(dark, 0.92))
+    _gm.ACCENT_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
+    _gm.TEXT_LINK = (light, dark)
+    _gm.ERROR_C = (light, dark)
+    _gm.ERROR_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
+
+
 SITES = {
     'JableTV': {'browser': JableTVBrowser},
     'MissAV': {'browser': MissAVBrowser},
@@ -786,7 +834,119 @@ _thumb_session: Optional[requests.Session] = None
 _thumb_lock = threading.Lock()
 _thumb_cache: dict = {}   # url -> PIL.Image (raw, not CTkImage; Tk root needed)
 _thumb_cache_lock = threading.Lock()   # guards _thumb_cache mutation across the 4 worker threads
-_THUMB_SIZE = (300, 169)  # readable 16:9 cards at the default three-column layout
+_THUMB_SIZE = (1920, 1080)  # High resolution HD cache box for uncompromised sharpness on 1080p/4K screens
+
+
+def _create_height_fitted_hd_ctk_image(
+    img: Image.Image,
+    target_w: int,
+    target_h: int
+) -> ctk.CTkImage:
+    """
+    Render thumbnail with HEIGHT as the primary fitting dimension.
+
+    Rules:
+    - Preserve original aspect ratio.
+    - Never crop.
+    - Never stretch/distort.
+    - Never upscale a source image beyond its native resolution.
+    - Prefer matching the target height.
+    - If the image is narrower than the frame, leave black space on the sides.
+    - If the image cannot fit at the requested height without exceeding the
+      frame width, scale it down to fit the width instead.
+    """
+
+    target_w = max(1, int(target_w))
+    target_h = max(1, int(target_h))
+
+    if not img:
+        empty = Image.new("RGB", (target_w, target_h), (16, 16, 22))
+        return ctk.CTkImage(
+            light_image=empty,
+            dark_image=empty,
+            size=(target_w, target_h)
+        )
+
+    img = img.convert("RGB")
+
+    iw, ih = img.size
+
+    if iw <= 0 or ih <= 0:
+        empty = Image.new("RGB", (target_w, target_h), (16, 16, 22))
+        return ctk.CTkImage(
+            light_image=empty,
+            dark_image=empty,
+            size=(target_w, target_h)
+        )
+
+    # ------------------------------------------------------------
+    # 1. PRIMARY RULE: fit by HEIGHT
+    # ------------------------------------------------------------
+    height_scale = target_h / ih
+
+    # Never upscale a source image.
+    height_scale = min(height_scale, 1.0)
+
+    nw = max(1, int(round(iw * height_scale)))
+    nh = max(1, int(round(ih * height_scale)))
+
+    # ------------------------------------------------------------
+    # 2. If height-fitting makes the image wider than the frame,
+    #    reduce it to fit the WIDTH instead.
+    #
+    #    This prevents horizontal cropping.
+    # ------------------------------------------------------------
+    if nw > target_w:
+        width_scale = target_w / iw
+
+        # Never upscale.
+        width_scale = min(width_scale, 1.0)
+
+        nw = max(1, int(round(iw * width_scale)))
+        nh = max(1, int(round(ih * width_scale)))
+
+    # ------------------------------------------------------------
+    # 3. High-quality resize
+    # ------------------------------------------------------------
+    if (nw, nh) != (iw, ih):
+        resample_filter = getattr(
+            Image,
+            "Resampling",
+            Image
+        ).LANCZOS
+
+        fitted = img.resize(
+            (nw, nh),
+            resample_filter
+        )
+    else:
+        fitted = img.copy()
+
+    # ------------------------------------------------------------
+    # 4. Black thumbnail frame
+    # ------------------------------------------------------------
+    canvas_img = Image.new(
+        "RGB",
+        (target_w, target_h),
+        (16, 16, 22)
+    )
+
+    # Center horizontally.
+    px = max(0, (target_w - nw) // 2)
+
+    # Center vertically.
+    py = max(0, (target_h - nh) // 2)
+
+    canvas_img.paste(
+        fitted,
+        (px, py)
+    )
+
+    return ctk.CTkImage(
+        light_image=canvas_img,
+        dark_image=canvas_img,
+        size=(target_w, target_h)
+    )
 
 
 def _get_thumb_session() -> requests.Session:
@@ -964,6 +1124,7 @@ class ModernApp(ctk.CTk):
 
         self.title('FetchJAV')
         self.geometry('1280x820')
+        self._base_window_width = 1280
         self.minsize(980, 680)
         self.configure(fg_color=BG_DARK)
 
@@ -1098,6 +1259,22 @@ class ModernApp(ctk.CTk):
                     light_image=Image.open(h_p), dark_image=Image.open(h_p),
                     size=(16, 16)
                 )
+            h_fl_p = os.path.join(img_dir_dest, 'icon_heart_filled_light.png')
+            h_fd_p = os.path.join(img_dir_dest, 'icon_heart_filled_dark.png')
+            if os.path.exists(h_fl_p) and os.path.exists(h_fd_p):
+                self._heart_active_icon = ctk.CTkImage(
+                    light_image=Image.open(h_fl_p), dark_image=Image.open(h_fd_p),
+                    size=(16, 16)
+                )
+            else:
+                h_pri_p = os.path.join(img_dir_dest, 'icon_heart_pri.png')
+                if os.path.exists(h_pri_p):
+                    self._heart_active_icon = ctk.CTkImage(
+                        light_image=Image.open(h_pri_p), dark_image=Image.open(h_pri_p),
+                        size=(16, 16)
+                    )
+                else:
+                    self._heart_active_icon = getattr(self, '_heart_icon', None)
             p_p = os.path.join(img_dir_dest, 'icon_plus_white.png')
             if os.path.exists(p_p):
                 self._plus_icon = ctk.CTkImage(
@@ -1504,8 +1681,10 @@ class ModernApp(ctk.CTk):
         if width <= 1:
             width = 1280
 
-        # Base mathematical threshold: when window width < 850px, Settings text reaches the right controls
-        is_compact_header = width < 850
+        # 10% width reduction threshold from base initial window width (1280px * 0.9 = 1152px)
+        base_w = getattr(self, '_base_window_width', 1280)
+        compact_threshold = base_w * 0.90
+        is_compact_header = width <= compact_threshold
         is_compact_sidebar = width < 880
 
         # Runtime position check: if right_info left edge is near the centered tab_nav right edge with text
@@ -1529,9 +1708,11 @@ class ModernApp(ctk.CTk):
             btn = info['btn']
             try:
                 if is_compact_header:
-                    btn.configure(text="")
+                    btn.configure(text="", width=40, compound='center')
+                    btn.pack_configure(padx=2)
                 else:
-                    btn.configure(text=f" {tab_labels[key]}")
+                    btn.configure(text=f" {tab_labels[key]}", width=120, compound='left')
+                    btn.pack_configure(padx=0)
             except Exception:
                 pass
 
@@ -1592,6 +1773,9 @@ class ModernApp(ctk.CTk):
             logical_width = event.width
 
         self._update_responsive_nav(logical_width)
+
+        if getattr(self, '_browse_mode', '') == 'preview':
+            self._update_preview_layout(logical_width)
 
         columns = browse_columns_for_width(logical_width)
         if columns == self._grid_columns:
@@ -1891,6 +2075,16 @@ class ModernApp(ctk.CTk):
                                        text_color=ACCENT)
         self._brand_lbl.pack(side='left', padx=(4, 0))
 
+        # Clicking any part of the logo navigates to the Browse (home) tab.
+        # If already on browse but in preview mode, switch back to grid view.
+        def _go_home(e=None):
+            self._select_tab('browse')
+            if getattr(self, '_browse_mode', 'grid') != 'grid':
+                self._set_browse_mode('grid')
+        for _logo_widget in (brand, self._brand_lbl_fetch, self._brand_lbl_jav, self._brand_lbl):
+            _logo_widget.bind('<Button-1>', _go_home)
+            _logo_widget.configure(cursor='hand2')
+
         # Center Navigation Tabs (Explore, Download, Settings)
         self._tab_keys = ['browse', 'download', 'settings']
         tab_labels = {'browse': T('tab_browse'), 'download': T('tab_download'), 'settings': T('tab_settings')}
@@ -1965,7 +2159,7 @@ class ModernApp(ctk.CTk):
                 fg_color='transparent', hover=False,
                 text_color=TEXT_SEC, font=(ui_font(), 14, 'bold'),
                 cursor='hand2', height=42, corner_radius=0,
-                command=lambda k=key: self._select_tab(k)
+                command=lambda k=key: (self._select_tab(k), self._set_browse_mode('grid')) if k == 'browse' else self._select_tab(k)
             )
             btn.pack(side='left', padx=0, fill='y')
 
@@ -2443,8 +2637,16 @@ class ModernApp(ctk.CTk):
     def _on_global_player_key(self, event):
         if getattr(self, '_browse_mode', '') != 'preview':
             return
-        if not getattr(self, '_is_mouse_over_player', False):
-            return
+
+        # Do not steal key events if focus is inside an entry field or text box
+        try:
+            focus_w = self.focus_get()
+            if focus_w:
+                w_type = str(type(focus_w)).lower()
+                if 'entry' in w_type or 'text' in w_type or 'spinbox' in w_type:
+                    return
+        except Exception:
+            pass
 
         keysym = str(getattr(event, 'keysym', '') or '').lower()
         if keysym in ('space', 'k'):
@@ -2547,13 +2749,21 @@ class ModernApp(ctk.CTk):
         def _on_leave(e):
             self._is_mouse_over_player = False
 
+        def _on_click(e):
+            try:
+                widget.focus_set()
+            except Exception:
+                pass
+
         try:
             widget.bind('<Enter>', _on_enter, add='+')
             widget.bind('<Leave>', _on_leave, add='+')
+            widget.bind('<Button-1>', _on_click, add='+')
             for child in widget.winfo_children():
                 try:
                     child.bind('<Enter>', _on_enter, add='+')
                     child.bind('<Leave>', _on_leave, add='+')
+                    child.bind('<Button-1>', _on_click, add='+')
                 except Exception:
                     pass
         except Exception:
@@ -2728,7 +2938,7 @@ class ModernApp(ctk.CTk):
         area = self._preview_area
 
         shell = ctk.CTkFrame(area, fg_color=BG_DARK, corner_radius=0)
-        shell.pack(fill='both', expand=True, padx=12, pady=10)
+        shell.pack(fill='both', expand=True, padx=(12, 0), pady=0)
 
         # Single Scroll Container: video player & related videos scroll together using one scroll bar
         main_scroll = ctk.CTkScrollableFrame(
@@ -2744,9 +2954,9 @@ class ModernApp(ctk.CTk):
         left_main = ctk.CTkFrame(split, fg_color='transparent')
         left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
-        # Right Sidebar Pane (Related Videos) - Width 333px (reduced 10%) with right margin to clear scrollbar
-        right_sidebar = ctk.CTkFrame(split, width=333, fg_color='transparent')
-        right_sidebar.pack(side='right', fill='y', anchor='n', padx=(0, 16))
+        # Right Sidebar Pane (Related Videos) - 24px right padding to ensure scrollbar never cuts off cards
+        right_sidebar = ctk.CTkFrame(split, width=330, fg_color='transparent')
+        right_sidebar.pack(side='right', fill='y', anchor='n', padx=(0, 24))
 
         # ── 1. EMBEDDED VIDEO PLAYER FRAME ─────────────────────────────────
         player_container = ctk.CTkFrame(
@@ -2837,56 +3047,145 @@ class ModernApp(ctk.CTk):
             corner_radius=4, height=22, padx=8,
             font=(ui_font(), 10)).pack(side='left')
 
+        url = source.page_url or (self._preview_video or {}).get('url', '')
+
+        # Automatically record view history
+        config.add_view_history({
+            'url': url,
+            'title': title_text,
+            'thumbnail': source.thumbnail or (self._preview_video or {}).get('thumbnail', '') or (self._preview_video or {}).get('img', ''),
+            'duration': dur_str,
+            'site_name': source.site_name or (self._preview_video or {}).get('site_name', ''),
+        })
+
         actions_right = ctk.CTkFrame(meta_row, fg_color='transparent')
         actions_right.pack(side='right')
 
-        url = source.page_url or (self._preview_video or {}).get('url', '')
-        is_sel = url in getattr(self, '_selected_urls', set())
-        sel_text = ('✓ ' + T('preview_in_download')) if is_sel else ('+ ' + T('add_to_queue'))
+        def _add_to_queue_direct():
+            dest = getattr(self, '_dest_var', None)
+            dest_val = dest.get() if dest else 'download'
+            evidence = self._source_subtitle_evidence_for_video(self._preview_video) if hasattr(self, '_source_subtitle_evidence_for_video') else ()
 
-        def _toggle_q():
-            self._toggle_select(url)
-            self._render_preview_detail(source)
+            items_now = getattr(self, '_dlmgr').get_items() if hasattr(self, '_dlmgr') else []
+            curr_item = next((i for i in items_now if i.url == url), None)
 
-        def _direct_dl():
-            if url not in self._selected_urls:
-                self._toggle_select(url)
-            self._start_selected_downloads()
+            status_lbl = getattr(self, '_status_lbl', None)
+            if curr_item is not None:
+                self._dlmgr.remove_item(url)
+                if status_lbl:
+                    status_lbl.configure(text=f"🗑 Removed from queue: {title_text[:40]}")
+            else:
+                if url and M3U8Sites.VaildateUrl(url):
+                    self._dlmgr.add_item(
+                        url, state='等待中', dest=dest_val,
+                        source_subtitle_evidence=evidence
+                    )
+                if status_lbl:
+                    status_lbl.configure(text=f"📋 {T('add_to_queue')}: {title_text[:40]}")
+
+            self._update_preview_action_buttons()
+
+        def _direct_download():
+            dest = getattr(self, '_dest_var', None)
+            dest_val = dest.get() if dest else 'download'
+            evidence = self._source_subtitle_evidence_for_video(self._preview_video) if hasattr(self, '_source_subtitle_evidence_for_video') else ()
+
+            items_now = getattr(self, '_dlmgr').get_items() if hasattr(self, '_dlmgr') else []
+            curr_item = next((i for i in items_now if i.url == url), None)
+
+            is_enqueued = False
+            if curr_item is not None:
+                is_active = (hasattr(self._dlmgr, '_active') and url in self._dlmgr._active)
+                is_pending = (hasattr(self._dlmgr, '_pending') and any(t.url == url for t in self._dlmgr._pending))
+                is_downloading_state = (curr_item.state in ('下載中', '準備中', '字幕準備中', '字幕辨識中', '字幕翻譯中'))
+                is_enqueued = is_active or is_pending or is_downloading_state
+
+            status_lbl = getattr(self, '_status_lbl', None)
+            if curr_item is not None and curr_item.state == '已下載':
+                # Download is completed: redirect user to the download page
+                self._select_tab('download')
+                return
+            elif is_enqueued:
+                self._dlmgr.remove_item(url)
+                if status_lbl:
+                    status_lbl.configure(text=f"🛑 Download cancelled: {title_text[:40]}")
+            else:
+                if url and M3U8Sites.VaildateUrl(url):
+                    self._dlmgr.add_item(
+                        url, state='等待中', dest=dest_val,
+                        source_subtitle_evidence=evidence
+                    )
+                    self._dlmgr.enqueue(url, dest_val)
+                if status_lbl:
+                    status_lbl.configure(text=f"🚀 {T('preview_downloading')}: {title_text[:40]}")
+
+            self._update_preview_action_buttons()
+
+        is_saved = config.is_video_saved(url)
+
+        def _toggle_save():
+            v_info = {
+                'url': url,
+                'title': title_text,
+                'thumbnail': source.thumbnail or (self._preview_video or {}).get('thumbnail', '') or (self._preview_video or {}).get('img', ''),
+                'duration': dur_str,
+                'site_name': source.site_name or (self._preview_video or {}).get('site_name', ''),
+            }
+            new_saved = config.toggle_saved_video(v_info)
+            status_lbl = getattr(self, '_status_lbl', None)
+            if status_lbl:
+                status_lbl.configure(text=T('video_saved_toast') if new_saved else T('video_removed_toast'))
+            p_btn = getattr(self, '_preview_heart_btn', None)
+            if p_btn:
+                self._animate_heart_btn(p_btn, new_saved)
+            self._update_card_heart_btn(url, animate=False)
+            if getattr(self, '_active_settings_cat', '') == 'saved':
+                self._switch_settings_cat('saved')
 
         # Heart button with SVG heart icon
-        ctk.CTkButton(
-            actions_right, text='' if getattr(self, '_heart_icon', None) else '♡',
-            image=getattr(self, '_heart_icon', None),
+        heart_img = getattr(self, '_heart_active_icon', None) if is_saved else getattr(self, '_heart_icon', None)
+        heart_text = '' if heart_img else ('♥' if is_saved else '♡')
+        self._preview_heart_btn = ctk.CTkButton(
+            actions_right, text=heart_text,
+            image=heart_img,
             width=34, height=32,
-            corner_radius=CONTROL_RADIUS, fg_color='transparent',
-            border_width=1, border_color=BORDER_HOVER,
-            hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-            command=lambda: None
-        ).pack(side='left', padx=(0, 6))
+            corner_radius=CONTROL_RADIUS,
+            fg_color='transparent',
+            border_width=1,
+            border_color=ACCENT if is_saved else BORDER_HOVER,
+            hover_color=BG_CARD_HOVER,
+            text_color=ACCENT if is_saved else TEXT_PRI,
+            command=_toggle_save
+        )
+        self._preview_heart_btn.pack(side='left', padx=(0, 6))
 
-        # Reduced width Add to Queue button with SVG plus icon
-        sel_text = T('preview_in_download') if is_sel else T('add_to_queue')
-        ctk.CTkButton(
-            actions_right, text=' ' + sel_text, height=32, width=96,
+        # Add to Queue button (Separate queue functionality, solid green when active)
+        self._preview_q_btn = ctk.CTkButton(
+            actions_right, text=' ' + T('add_to_queue'), height=32, width=110,
             image=getattr(self, '_plus_icon', None),
             corner_radius=CONTROL_RADIUS,
-            fg_color=ACCENT if is_sel else 'transparent',
-            border_width=0 if is_sel else 1, border_color=BORDER_HOVER,
-            hover_color=ACCENT_HOVER if is_sel else BG_CARD_HOVER,
-            text_color=WHITE if is_sel else TEXT_PRI,
-            font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10),
-            command=_toggle_q
-        ).pack(side='left', padx=(0, 6))
+            fg_color='transparent',
+            border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI,
+            font=(ui_font(), 10),
+            command=_add_to_queue_direct
+        )
+        self._preview_q_btn.pack(side='left', padx=(0, 6))
 
-        # Reduced width Download button with SVG download icon
-        ctk.CTkButton(
-            actions_right, text=' ' + T('download_btn'), height=32, width=92,
+        # Download button (Separate download functionality, shows Downloading (52%), redirects when completed)
+        self._preview_dl_btn = ctk.CTkButton(
+            actions_right, text=' ' + T('download_btn'), height=32, width=110,
             image=getattr(self, '_dl_icon', None),
             corner_radius=CONTROL_RADIUS, fg_color=ACCENT,
             hover_color=ACCENT_HOVER, text_color=WHITE,
             font=(ui_font(), 10, 'bold'),
-            command=_direct_dl
-        ).pack(side='left')
+            command=_direct_download
+        )
+        self._preview_dl_btn.pack(side='left')
+
+        # Synchronize action button visuals with download manager state
+        self._update_preview_action_buttons()
 
         # ── 3. INFO & DESCRIPTION PANE ──────────────────────────────────────
         info_card = ctk.CTkFrame(
@@ -2965,10 +3264,34 @@ class ModernApp(ctk.CTk):
 
         cat_grid = ctk.CTkFrame(left_main, fg_color='transparent')
         cat_grid.pack(fill='x', pady=(0, 16))
+        for c in range(3):
+            cat_grid.grid_columnconfigure(c, weight=1, uniform='cat_cols')
 
         v_list = getattr(self, '_videos', [])
-        display_vids = [v for v in v_list if v.get('url') != url][:4]
-        for v_item in display_vids:
+
+        # Collect watched / viewed URLs to skip (view history + current video + preview history)
+        view_history_urls = {item.get('url') for item in config.get_view_history() if item.get('url')}
+        watched_urls = set(view_history_urls)
+        watched_urls.add(url)  # current video being viewed
+        if hasattr(self, '_preview_history') and self._preview_history:
+            for p_item in self._preview_history:
+                if isinstance(p_item, dict) and p_item.get('url'):
+                    watched_urls.add(p_item.get('url'))
+
+        # Filter out watched & view history videos first
+        unwatched_candidates = [v for v in v_list if v.get('url') and v.get('url') not in watched_urls]
+        if len(unwatched_candidates) < 6:
+            unwatched_candidates = [v for v in v_list if v.get('url') and v.get('url') != url]
+
+        # Dynamic rotation per preview session so every session shows fresh related videos
+        shift = (getattr(self, '_preview_gen', 0) * 3) % max(len(unwatched_candidates), 1)
+        rotated_pool = unwatched_candidates[shift:] + unwatched_candidates[:shift]
+
+        # Disjoint selection: "More from this category" gets first 3, "Related Videos" gets next 10 (zero duplicates)
+        display_vids = rotated_pool[:3]
+        used_category_urls = {v.get('url') for v in display_vids if v.get('url')}
+
+        for v_idx, v_item in enumerate(display_vids):
             v_url = v_item.get('url', '')
             v_title = v_item.get('title', '')
             v_dur = v_item.get('duration', '')
@@ -2976,10 +3299,10 @@ class ModernApp(ctk.CTk):
 
             v_card = ctk.CTkFrame(
                 cat_grid, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
-                border_width=1, border_color=BORDER_CARD, width=150)
-            v_card.pack(side='left', padx=4, fill='both', expand=True)
+                border_width=1, border_color=BORDER_CARD)
+            v_card.grid(row=0, column=v_idx, padx=4, sticky='nsew')
 
-            v_thumb_holder = ctk.CTkFrame(v_card, fg_color=BG_SIDEBAR, height=84, corner_radius=6)
+            v_thumb_holder = ctk.CTkFrame(v_card, fg_color=BG_SIDEBAR, height=180, corner_radius=6)
             v_thumb_holder.pack(fill='x', padx=4, pady=(4, 0))
             v_thumb_holder.pack_propagate(False)
 
@@ -2993,10 +3316,34 @@ class ModernApp(ctk.CTk):
                     v_thumb_holder, text=f' {v_dur} ', text_color=WHITE, fg_color='#000000',
                     corner_radius=3, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
 
-            t_short = v_title[:32] + '...' if len(v_title) > 32 else v_title
+            v_info = ctk.CTkFrame(v_card, fg_color='transparent')
+            v_info.pack(fill='x', padx=8, pady=(6, 8))
+
             ctk.CTkLabel(
-                v_card, text=t_short, text_color=TEXT_PRI,
-                font=(ui_font(), 10), wraplength=140, justify='left').pack(padx=6, pady=(4, 6), anchor='w')
+                v_info, text=v_title, text_color=TEXT_PRI,
+                font=(ui_font(), 10, 'bold'), wraplength=220, justify='left', anchor='w').pack(anchor='w', fill='x', pady=(0, 4))
+
+            v_badges = ctk.CTkFrame(v_info, fg_color='transparent')
+            v_badges.pack(anchor='w', fill='x')
+
+            ctk.CTkLabel(
+                v_badges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
+                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
+                font=(ui_font(), 9, 'bold')).pack(side='left')
+
+            v_is_saved = config.is_video_saved(v_url)
+            v_heart_img = getattr(self, '_heart_active_icon', None) if v_is_saved else getattr(self, '_heart_icon', None)
+            v_heart_text = '' if v_heart_img else ('♥' if v_is_saved else '♡')
+
+            v_heart_btn = ctk.CTkButton(
+                v_badges, text=v_heart_text, image=v_heart_img,
+                width=24, height=22, corner_radius=4,
+                fg_color='transparent',
+                border_width=1, border_color=ACCENT if v_is_saved else BORDER_HOVER,
+                hover_color=BG_CARD_HOVER, text_color=ACCENT if v_is_saved else TEXT_PRI,
+                command=lambda item=v_item, u=v_url: self._on_card_heart_click(item, u)
+            )
+            v_heart_btn.pack(side='right')
 
             def _bind_v(widget, item=v_item):
                 widget.bind('<Button-1>', lambda e: self._open_preview(item))
@@ -3005,85 +3352,32 @@ class ModernApp(ctk.CTk):
             _bind_v(v_card)
             _bind_v(v_thumb_holder)
             _bind_v(v_lbl)
+            _bind_v(v_info)
 
-        # ── 5. RIGHT SIDEBAR (RELATED VIDEOS) ────────────────────────────────
-        ctk.CTkLabel(
-            right_sidebar, text='Related Videos', text_color=TEXT_PRI,
-            font=(ui_font(), 14, 'bold')).pack(anchor='w', padx=10, pady=(0, 10))
+        # ── 5. RELATED VIDEOS (DYNAMIC RESPONSIVE CONTAINER) ─────────────────
+        bottom_related = ctk.CTkFrame(left_main, fg_color='transparent')
+        bottom_related.pack(fill='x', pady=(8, 16))
 
-        related_vids = [v for v in v_list if v.get('url') != url][:10]
+        related_candidates = [v for v in rotated_pool if v.get('url') and v.get('url') not in used_category_urls]
+        related_vids = related_candidates[:10]
         if not related_vids:
-            related_vids = v_list[:10]
+            related_vids = [v for v in v_list if v.get('url') != url and v.get('url') not in used_category_urls][:10]
 
-        for rv in related_vids:
-            r_url = rv.get('url', '')
-            r_title = rv.get('title', '')
-            r_dur = rv.get('duration', '')
-            r_thumb = rv.get('thumbnail', '')
-            r_is_sel = r_url in getattr(self, '_selected_urls', set())
+        self._preview_left_main = left_main
+        self._preview_right_sidebar = right_sidebar
+        self._preview_bottom_related = bottom_related
+        self._preview_related_vids = related_vids
+        self._preview_layout_mode = None
+        self._preview_layout_cols = None
 
-            rcard = ctk.CTkFrame(
-                right_sidebar, fg_color=ACCENT_DIM if r_is_sel else BG_CARD,
-                corner_radius=CARD_RADIUS,
-                border_width=2 if r_is_sel else 1,
-                border_color=ACCENT if r_is_sel else BORDER_CARD)
-            rcard.pack(fill='x', padx=2, pady=6)
+        try:
+            w = self.winfo_width() / max(self._get_window_scaling(), 1.0)
+            if w <= 1:
+                w = 1200
+        except Exception:
+            w = 1200
 
-            # Top Preview Image Container (framed preview holder)
-            rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=145, corner_radius=6)
-            rthumb_holder.pack(fill='x', padx=6, pady=(6, 0))
-            rthumb_holder.pack_propagate(False)
-
-            rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
-            rlbl.pack(fill='both', expand=True)
-            if r_thumb:
-                self._load_thumb_async(r_thumb, rlbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
-
-            if r_dur:
-                ctk.CTkLabel(
-                    rthumb_holder, text=f' {r_dur} ', text_color=WHITE, fg_color='#000000',
-                    corner_radius=4, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
-
-            # Details Section (title neatly wrapped below the preview image)
-            rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
-            rinfo.pack(fill='x', padx=8, pady=(6, 8))
-
-            ctk.CTkLabel(
-                rinfo, text=r_title, text_color=TEXT_PRI,
-                font=(ui_font(), 10, 'bold'), wraplength=285, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
-
-            rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
-            rbadges.pack(anchor='w')
-
-            ctk.CTkLabel(
-                rbadges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
-                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
-                font=(ui_font(), 9, 'bold')).pack(side='left', padx=(0, 6))
-
-            ctk.CTkLabel(
-                rbadges, text='1080p', text_color=TEXT_DIM,
-                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
-                font=(ui_font(), 9)).pack(side='left')
-
-            def _bind_rv(widget, item=rv, frame=rcard, sel=r_is_sel):
-                widget.bind('<Button-1>', lambda e: self._open_preview(item))
-                widget.configure(cursor='hand2')
-                def _on_enter(e):
-                    if not sel:
-                        frame.configure(border_color=BORDER_HOVER)
-                def _on_leave(e):
-                    if not sel:
-                        frame.configure(border_color=BORDER_CARD)
-                try:
-                    widget.bind('<Enter>', _on_enter, add='+')
-                    widget.bind('<Leave>', _on_leave, add='+')
-                except Exception:
-                    pass
-
-            _bind_rv(rcard)
-            _bind_rv(rthumb_holder)
-            _bind_rv(rlbl)
-            _bind_rv(rinfo)
+        self._update_preview_layout(w)
 
     # ── Download Tab ─────────────────────────────────────────────────
     def _build_download_tab(self):
@@ -3432,81 +3726,13 @@ class ModernApp(ctk.CTk):
             ctk.CTkOptionMenu(row_res,
                               values=self._resolution_values(),
                               variable=self._res_var,
-                              command=self._on_res_change, width=180, height=32,
-                              corner_radius=8,
-                              fg_color=BG_INPUT, button_color=BORDER_HOVER,
+                              command=self._on_res_change, width=180, height=36,
+                              corner_radius=CONTROL_RADIUS,
+                              fg_color=BG_CARD, button_color=BG_CARD,
                               button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-                              dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
-                              dropdown_text_color=TEXT_PRI).pack(side='left', padx=10)
-
-            # Subtitles
-            row_subtitle = ctk.CTkFrame(grp, fg_color='transparent')
-            row_subtitle.pack(fill='x', pady=(3, 1))
-            ctk.CTkLabel(row_subtitle, text=T('subtitle_setting'), text_color=TEXT_PRI,
-                         font=(ui_font(), 12, 'bold'), width=130,
-                         anchor='w').pack(side='left')
-            self._subtitle_var = ctk.StringVar(value=self._subtitle_label())
-            ctk.CTkOptionMenu(
-                row_subtitle, values=self._subtitle_values(),
-                variable=self._subtitle_var, command=self._on_subtitle_change,
-                width=230, height=32, corner_radius=8,
-                fg_color=BG_INPUT, button_color=BORDER_HOVER,
-                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-                dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
-                dropdown_text_color=TEXT_PRI).pack(side='left', padx=10)
-            ctk.CTkLabel(
-                grp, text=T('subtitle_desc'), text_color=TEXT_DIM,
-                font=(ui_font(), 10),
-                wraplength=SETTINGS_INLINE_HELP_WRAP,
-                justify='left', anchor='w').pack(
-                    anchor='w', padx=(140, 20), pady=(0, 4))
-
-            # Recognition quality
-            row_recognition = ctk.CTkFrame(grp, fg_color='transparent')
-            row_recognition.pack(fill='x', pady=(3, 1))
-            ctk.CTkLabel(
-                row_recognition, text=T('recognition_quality_setting'),
-                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
-                width=130, anchor='w').pack(side='left')
-            self._recognition_quality_var = ctk.StringVar(
-                value=self._recognition_quality_label())
-            ctk.CTkOptionMenu(
-                row_recognition, values=self._recognition_quality_values(),
-                variable=self._recognition_quality_var,
-                command=self._on_recognition_quality_change,
-                width=230, height=32, corner_radius=8,
-                fg_color=BG_INPUT, button_color=BORDER_HOVER,
-                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-                dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
-                dropdown_text_color=TEXT_PRI).pack(side='left', padx=10)
-            ctk.CTkLabel(
-                grp, text=T('recognition_quality_desc'), text_color=TEXT_DIM,
-                font=(ui_font(), 10),
-                wraplength=SETTINGS_INLINE_HELP_WRAP,
-                justify='left', anchor='w').pack(
-                    anchor='w', padx=(140, 20), pady=(0, 4))
-
-            # Subtitle translation provider
-            row_translation = ctk.CTkFrame(grp, fg_color='transparent')
-            row_translation.pack(fill='x', pady=(3, 1))
-            ctk.CTkLabel(
-                row_translation, text=T('translation_provider_setting'),
-                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
-                width=130, anchor='w').pack(side='left')
-            self._translation_provider_status_lbl = ctk.CTkLabel(
-                row_translation,
-                text=translation_provider_summary(),
-                text_color=TEXT_SEC, font=(ui_font(), 10),
-                anchor='w')
-            self._translation_provider_status_lbl.pack(
-                side='left', fill='x', expand=True, padx=10)
-            ctk.CTkButton(
-                row_translation, text=T('translation_provider_configure'),
-                width=86, height=32, corner_radius=8,
-                fg_color='transparent', border_width=1,
-                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
-                text_color=TEXT_PRI, font=(ui_font(), 10, 'bold'),
-                command=self._open_translation_settings).pack(side='right')
+                              dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                              dropdown_text_color=WHITE, dynamic_resizing=False,
+                              font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)).pack(side='left', padx=10)
 
         def render_proxy_page(container):
             proxy = ctk.CTkFrame(container, fg_color='transparent')
@@ -3540,8 +3766,9 @@ class ModernApp(ctk.CTk):
             proxy_actions.pack(fill='x', pady=(10, 2))
             ctk.CTkButton(
                 proxy_actions, text=T('proxy_save'), width=70, height=34,
-                corner_radius=8, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                text_color=WHITE, command=self._on_proxy_save).pack(
+                corner_radius=CONTROL_RADIUS, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                text_color=WHITE, font=(ui_font(), 10, 'bold'),
+                command=self._on_proxy_save).pack(
                     side='left', padx=(126, 6))
             ctk.CTkButton(
                 proxy_actions, text=T('proxy_windows'), width=86, height=34,
@@ -3558,6 +3785,96 @@ class ModernApp(ctk.CTk):
                 proxy_actions, text='', text_color=TEXT_SEC, font=(ui_font(), 10))
             self._proxy_status_lbl.pack(side='left', padx=12)
             self._refresh_proxy_status()
+
+        def render_subtitle_page(container):
+            grp = ctk.CTkFrame(container, fg_color='transparent')
+            grp.pack(fill='both', expand=True)
+
+            grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
+            grp_hdr.pack(fill='x', pady=(0, 8))
+            ctk.CTkLabel(grp_hdr, text=T('subtitle_settings_title') if 'subtitle_settings_title' in T.__code__.co_varnames else 'Subtitles & AI',
+                         font=(ui_font(), 15, 'bold'),
+                         text_color=TEXT_PRI).pack(side='left')
+
+            ctk.CTkFrame(grp, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 14))
+
+            # Subtitles
+            row_subtitle = ctk.CTkFrame(grp, fg_color='transparent')
+            row_subtitle.pack(fill='x', pady=(3, 1))
+            ctk.CTkLabel(row_subtitle, text=T('subtitle_setting'), text_color=TEXT_PRI,
+                         font=(ui_font(), 12, 'bold'), width=130,
+                         anchor='w').pack(side='left')
+            self._subtitle_var = ctk.StringVar(value=self._subtitle_label())
+            ctk.CTkOptionMenu(
+                row_subtitle, values=self._subtitle_values(),
+                variable=self._subtitle_var, command=self._on_subtitle_change,
+                width=230, height=36, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)).pack(side='left', padx=10)
+            ctk.CTkLabel(
+                grp, text=T('subtitle_desc'), text_color=TEXT_DIM,
+                font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w').pack(
+                    anchor='w', padx=(140, 20), pady=(0, 4))
+
+            # Recognition quality
+            row_recognition = ctk.CTkFrame(grp, fg_color='transparent')
+            row_recognition.pack(fill='x', pady=(3, 1))
+            ctk.CTkLabel(
+                row_recognition, text=T('recognition_quality_setting'),
+                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
+                width=130, anchor='w').pack(side='left')
+            self._recognition_quality_var = ctk.StringVar(
+                value=self._recognition_quality_label())
+            ctk.CTkOptionMenu(
+                row_recognition, values=self._recognition_quality_values(),
+                variable=self._recognition_quality_var,
+                command=self._on_recognition_quality_change,
+                width=230, height=36, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)).pack(side='left', padx=10)
+            ctk.CTkLabel(
+                grp, text=T('recognition_quality_desc'), text_color=TEXT_DIM,
+                font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w').pack(
+                    anchor='w', padx=(140, 20), pady=(0, 4))
+
+            # Subtitle translation provider
+            row_translation = ctk.CTkFrame(grp, fg_color='transparent')
+            row_translation.pack(fill='x', pady=(3, 1))
+            ctk.CTkLabel(
+                row_translation, text=T('translation_provider_setting'),
+                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
+                width=130, anchor='w').pack(side='left')
+            self._translation_provider_status_lbl = ctk.CTkLabel(
+                row_translation,
+                text=translation_provider_summary(),
+                text_color=TEXT_SEC, font=(ui_font(), 10),
+                anchor='w')
+            self._translation_provider_status_lbl.pack(
+                side='left', fill='x', expand=True, padx=10)
+            ctk.CTkButton(
+                row_translation, text=T('translation_provider_configure'),
+                width=86, height=32, corner_radius=8,
+                fg_color='transparent', border_width=1,
+                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, font=(ui_font(), 10, 'bold'),
+                command=self._open_translation_settings).pack(side='right')
+            ctk.CTkLabel(
+                grp, text=T('translation_provider_desc'),
+                text_color=TEXT_DIM,
+                font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w').pack(
+                    anchor='w', padx=(140, 20), pady=(0, 4))
 
         def render_cf_page(container):
             cf = ctk.CTkFrame(container, fg_color='transparent')
@@ -3587,12 +3904,13 @@ class ModernApp(ctk.CTk):
                          anchor='w').pack(side='left')
             ctk.CTkOptionMenu(row_host, values=hosts,
                               variable=self._cf_host_var,
-                              command=self._on_cf_host_change, width=220, height=34,
-                              corner_radius=8,
-                              fg_color=BG_INPUT, button_color=BORDER_HOVER,
+                              command=self._on_cf_host_change, width=220, height=36,
+                              corner_radius=CONTROL_RADIUS,
+                              fg_color=BG_CARD, button_color=BG_CARD,
                               button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-                              dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
-                              dropdown_text_color=TEXT_PRI).pack(side='left', padx=10)
+                              dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                              dropdown_text_color=WHITE, dynamic_resizing=False,
+                              font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)).pack(side='left', padx=10)
 
             row_cookie = ctk.CTkFrame(cf, fg_color='transparent')
             row_cookie.pack(fill='x', pady=(8, 2))
@@ -3617,8 +3935,9 @@ class ModernApp(ctk.CTk):
             cf_actions = ctk.CTkFrame(cf, fg_color='transparent')
             cf_actions.pack(fill='x', pady=(10, 2))
             ctk.CTkButton(cf_actions, text=T('cf_save'), width=70, height=34,
-                          corner_radius=8, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                          text_color=WHITE, command=self._on_cf_save).pack(
+                          corner_radius=CONTROL_RADIUS, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                          text_color=WHITE, font=(ui_font(), 10, 'bold'),
+                          command=self._on_cf_save).pack(
                               side='left', padx=(126, 6))
             ctk.CTkButton(cf_actions, text=T('cf_clear'), width=70, height=34,
                           corner_radius=8, fg_color='transparent', border_width=1,
@@ -3629,12 +3948,200 @@ class ModernApp(ctk.CTk):
                                                font=(ui_font(), 10))
             self._cf_status_lbl.pack(side='left', padx=12)
 
+            ctk.CTkLabel(cf, text=T('cf_card_desc_long'),
+                         text_color=TEXT_DIM,
+                         font=(ui_font(), 10),
+                         wraplength=SETTINGS_INLINE_HELP_WRAP,
+                         justify='left', anchor='w').pack(anchor='w', pady=(12, 0))
+
         def render_queue_page(container):
             box = ctk.CTkFrame(container, fg_color='transparent')
             box.pack(fill='both', expand=True)
-            ctk.CTkLabel(box, text="Save Download Queue", font=(ui_font(), 15, 'bold'), text_color=TEXT_PRI).pack(anchor='w')
+
+            ctk.CTkLabel(box, text=T('queue_settings_title') if 'queue_settings_title' in T.__code__.co_varnames else 'Save Download Queue',
+                         font=(ui_font(), 15, 'bold'), text_color=TEXT_PRI).pack(anchor='w')
             ctk.CTkFrame(box, height=1, fg_color=BORDER).pack(fill='x', pady=(8, 14))
-            ctk.CTkLabel(box, text="Download queue items and active progress are automatically saved on exit.", text_color=TEXT_SEC, font=(ui_font(), 11)).pack(anchor='w')
+            ctk.CTkLabel(box, text=T('queue_card_desc'),
+                         text_color=TEXT_SEC, font=(ui_font(), 11)).pack(anchor='w', pady=(0, 12))
+
+            path_row = ctk.CTkFrame(box, fg_color='transparent')
+            path_row.pack(fill='x', pady=(0, 8))
+            ctk.CTkLabel(path_row, text=T('queue_path_label'), text_color=TEXT_PRI,
+                         font=(ui_font(), 12, 'bold'), width=100, anchor='w').pack(side='left')
+            self._queue_path_var = ctk.StringVar(value=CSV_PATH)
+            entry = ctk.CTkEntry(path_row, textvariable=self._queue_path_var,
+                         height=34, corner_radius=8,
+                         fg_color=BG_INPUT, border_color=BORDER, border_width=1,
+                         text_color=TEXT_PRI)
+            entry.pack(side='left', fill='x', expand=True, padx=10)
+            entry.configure(state='readonly')
+
+            actions = ctk.CTkFrame(box, fg_color='transparent')
+            actions.pack(fill='x', pady=(10, 2))
+            ctk.CTkButton(
+                actions, text=T('open_queue_folder'), width=110, height=34,
+                corner_radius=8, fg_color='transparent', border_width=1,
+                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, command=self._open_queue_folder
+            ).pack(side='left', padx=(100, 6))
+            ctk.CTkButton(
+                actions, text=T('clear_saved_queue'), width=110, height=34,
+                corner_radius=8, fg_color='transparent', border_width=1,
+                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=ACCENT, command=self._clear_saved_queue
+            ).pack(side='left')
+
+        ACCENT_PALETTE = [
+            ('🟥 Vermilion', '#E63946'),
+            ('🟧 Orange', '#FF8C00'),
+            ('🟥 Red', '#E81123'),
+            ('🔴 Red/Coral', '#D13438'),
+            ('🩷 Dark Pink', '#C30052'),
+            ('🩷 Magenta', '#BF0077'),
+            ('🟣 Magenta Purple', '#9A0089'),
+            ('🟪 Purple', '#881798'),
+            ('🟪 Blue Purple', '#744DA9'),
+            ('🟩 Green', '#10893E'),
+            ('🟢 Dark Green', '#107C10'),
+            ('🟢 Teal Green', '#018574'),
+            ('🔵 Teal Blue', '#2D7D9A'),
+            ('🔵 Blue', '#0063B1'),
+            ('🟦 Indigo', '#6B69D6'),
+            ('🟪 Light Indigo', '#8E8CD8'),
+            ('🟣 Light Purple', '#8764B8'),
+            ('🟦 Teal', '#038387'),
+            ('🟧 Coral', '#F68048'),
+            ('🩶 Mint', '#B0E4CC'),
+            ('🟥 Pure Red', '#FF0000'),
+            ('🟡 Gold', '#FFCC00'),
+            ('🟡 Yellow', '#FFC349'),
+            ('🔵 Sky Blue', '#2196F3'),
+            ('🟡 Light Gold', '#FED24F'),
+        ]
+
+        def _refresh_accent_widgets():
+            current_cat = getattr(self, '_active_settings_cat', 'update')
+            self._switch_settings_cat(current_cat)
+            try:
+                self._theme_btn.configure(text="", image=self._get_theme_icon() or "")
+            except Exception:
+                pass
+
+            light = ACCENT[0] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
+            dark = ACCENT[1] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
+            light_dim = _dim_color(light, '#FFFFFF', 0.12)
+            dark_dim = _dim_color(dark, '#16161B', 0.18)
+            light_hover = _brighten(light_dim, 1.08)
+            dark_hover = _brighten(dark_dim, 1.08)
+
+            try:
+                btn = getattr(self, '_preview_dl_btn', None)
+                if btn is not None and btn.winfo_exists():
+                    _acc = ACCENT[0] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
+                    _acc_dark = ACCENT[1] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
+                    dl_bg = (_dim_color(_acc, '#FFFFFF', 0.12), _dim_color(_acc_dark, '#16161B', 0.18))
+                    dl_hover = (_brighten(dl_bg[0], 1.08), _brighten(dl_bg[1], 1.08))
+                    btn.configure(
+                        text=' ' + T('download_btn'),
+                        image=getattr(self, '_dl_icon', None),
+                        fg_color=dl_bg,
+                        border_width=1,
+                        border_color=ACCENT,
+                        hover_color=dl_hover,
+                        text_color=ACCENT,
+                        width=110,
+                        font=(ui_font(), 10, 'bold')
+                    )
+            except Exception:
+                pass
+
+            try:
+                btn = getattr(self, '_preview_heart_btn', None)
+                if btn is not None and btn.winfo_exists():
+                    preview_source = getattr(self, '_preview_source', None)
+                    url = (preview_source.page_url if preview_source else '') or (getattr(self, '_preview_video', {}) or {}).get('url', '')
+                    is_saved = bool(url and config.is_video_saved(url))
+                    if is_saved:
+                        btn.configure(fg_color=ACCENT, border_color=ACCENT, text_color=WHITE)
+                    else:
+                        btn.configure(fg_color='transparent', border_color=BORDER_HOVER, text_color=TEXT_PRI)
+            except Exception:
+                pass
+
+        def _on_accent_color_select(hex_color):
+            config.set_accent_color(hex_color)
+            apply_accent_color(hex_color)
+            self.after(60, _refresh_accent_widgets)
+
+        def render_customized_page(container):
+            for w in container.winfo_children():
+                w.destroy()
+
+            saved = config.get_accent_color() or '#E63946'
+
+            box = ctk.CTkFrame(container, fg_color='transparent')
+            box.pack(fill='both', expand=True)
+
+            ctk.CTkLabel(box, text='Customized', font=(ui_font(), 15, 'bold'),
+                         text_color=TEXT_PRI).pack(anchor='w')
+            ctk.CTkFrame(box, height=1, fg_color=BORDER).pack(fill='x', pady=(8, 14))
+
+            ctk.CTkLabel(box, text='Accent Color', text_color=TEXT_PRI,
+                         font=(ui_font(), 12, 'bold')).pack(anchor='w', pady=(0, 8))
+
+            def _render_palette_grid(parent, title, get_color, exclude_hex=None):
+                lbl = ctk.CTkLabel(parent, text=title, text_color=TEXT_SEC,
+                                   font=(ui_font(), 11, 'bold'))
+                lbl.pack(anchor='w', pady=(8, 4))
+                grid = ctk.CTkFrame(parent, fg_color='transparent')
+                grid.pack(fill='x', pady=(0, 4))
+                cols = 6
+                exclude_hex = set(h.upper() for h in (exclude_hex or []))
+                for idx, (base_label, hex_color) in enumerate(ACCENT_PALETTE):
+                    if hex_color.upper() in exclude_hex:
+                        continue
+                    row = idx // cols
+                    col = idx % cols
+                    display_color = get_color(hex_color)
+                    swatch = ctk.CTkButton(
+                        grid, text='', width=36, height=36,
+                        corner_radius=18,
+                        fg_color=display_color, hover_color=display_color,
+                        command=lambda h=hex_color: _on_accent_color_select(h)
+                    )
+                    swatch.grid(row=row, column=col, padx=6, pady=6, sticky='w')
+                    if hex_color.upper() == saved.upper():
+                        try:
+                            swatch.configure(border_width=3, border_color=WHITE)
+                        except Exception:
+                            pass
+
+            _render_palette_grid(
+                box,
+                'Preferred for Dark Mode (brighter)',
+                lambda h: h
+            )
+            _render_palette_grid(
+                box,
+                'Preferred for Light Mode (darker)',
+                lambda h: _dim_color(h, '#000000', 0.25),
+                exclude_hex=[
+                    '#F68048', '#B0E4CC', '#FF0000', '#FFCC00', '#FFC349',
+                    '#2196F3', '#FED24F', '#FF8C00',
+                    '#E81123', '#D13438', '#C30052', '#BF0077', '#9A0089'
+                ]
+            )
+
+            preview_row = ctk.CTkFrame(box, fg_color='transparent')
+            preview_row.pack(fill='x', pady=(8, 4))
+            ctk.CTkLabel(preview_row, text='Current:', text_color=TEXT_SEC,
+                         font=(ui_font(), 11)).pack(side='left', padx=(0, 10))
+            ctk.CTkLabel(preview_row, text=saved, text_color=TEXT_PRI,
+                         font=(ui_font(), 11, 'bold')).pack(side='left', padx=(0, 10))
+            cur_swatch = ctk.CTkButton(preview_row, text='', width=24, height=24,
+                                       corner_radius=12, fg_color=saved,
+                                       hover_color=saved, command=None)
+            cur_swatch.pack(side='left')
 
         def render_about_page(container):
             box = ctk.CTkFrame(container, fg_color='transparent')
@@ -3645,23 +4152,374 @@ class ModernApp(ctk.CTk):
             ctk.CTkLabel(box, text="• Supports JableTV, MissAV & SupJav", text_color=TEXT_PRI, font=(ui_font(), 11)).pack(anchor='w', pady=2)
             ctk.CTkLabel(box, text="• Multi-threaded chunk downloading & Whisper auto-subtitles", text_color=TEXT_PRI, font=(ui_font(), 11)).pack(anchor='w', pady=2)
 
+        def render_saved_page(container):
+            for w in container.winfo_children():
+                w.destroy()
+
+            grp = ctk.CTkFrame(container, fg_color='transparent')
+            grp.pack(fill='both', expand=True)
+
+            grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
+            grp_hdr.pack(fill='x', pady=(0, 8))
+
+            ctk.CTkLabel(
+                grp_hdr, text=T('saved_settings_title'),
+                font=(ui_font(), 15, 'bold'),
+                text_color=TEXT_PRI
+            ).pack(side='left')
+
+            saved_items = config.get_saved_videos()
+
+            if saved_items:
+                def _on_clear_all():
+                    config.clear_saved_videos()
+                    render_saved_page(container)
+
+                ctk.CTkButton(
+                    grp_hdr, text=T('saved_clear_all'), height=28, width=70,
+                    corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                    border_width=1, border_color=BORDER_HOVER,
+                    hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                    font=(ui_font(), 10),
+                    command=_on_clear_all
+                ).pack(side='right')
+
+            ctk.CTkFrame(grp, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 14))
+
+            if not saved_items:
+                empty_card = ctk.CTkFrame(grp, fg_color=BG_CARD, corner_radius=CARD_RADIUS, border_width=1, border_color=BORDER_CARD)
+                empty_card.pack(fill='x', pady=20, padx=10)
+                ctk.CTkLabel(
+                    empty_card, text=T('saved_empty_msg'), font=(ui_font(), 11), text_color=TEXT_SEC, justify='center'
+                ).pack(pady=(0, 20))
+                return
+
+            for item in saved_items:
+                url = item.get('url', '')
+                title = item.get('title') or url
+                site_name = item.get('site_name') or ''
+                duration = item.get('duration') or ''
+
+                item_card = ctk.CTkFrame(
+                    grp, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+                    border_width=1, border_color=BORDER_CARD
+                )
+                item_card.pack(fill='x', pady=4)
+
+                card_inner = ctk.CTkFrame(item_card, fg_color='transparent')
+                card_inner.pack(fill='x', padx=12, pady=10)
+
+                left_info = ctk.CTkFrame(card_inner, fg_color='transparent')
+                left_info.pack(side='left', fill='both', expand=True)
+
+                title_row = ctk.CTkFrame(left_info, fg_color='transparent')
+                title_row.pack(anchor='w', fill='x')
+
+                if site_name:
+                    ctk.CTkLabel(
+                        title_row, text=site_name, text_color=WHITE,
+                        fg_color=ACCENT, corner_radius=4, height=20, padx=6,
+                        font=(ui_font(), 9, 'bold')
+                    ).pack(side='left', padx=(0, 6))
+
+                ctk.CTkLabel(
+                    title_row, text=title, text_color=TEXT_PRI,
+                    font=(ui_font(), 12, 'bold'), anchor='w', wraplength=350, justify='left'
+                ).pack(side='left', fill='x', expand=True)
+
+                if duration or url:
+                    sub_info = duration if duration else url
+                    ctk.CTkLabel(
+                        left_info, text=sub_info, text_color=TEXT_DIM,
+                        font=(ui_font(), 10), anchor='w'
+                    ).pack(anchor='w', pady=(2, 0))
+
+                right_btns = ctk.CTkFrame(card_inner, fg_color='transparent')
+                right_btns.pack(side='right', padx=(10, 0))
+
+                def _open_item_preview(target_item=item):
+                    self._select_tab('browse')
+                    self._open_preview(target_item)
+
+                def _remove_item(target_url=url):
+                    config.remove_saved_video(target_url)
+                    render_saved_page(container)
+
+                def _queue_item(target_url=url):
+                    if target_url not in getattr(self, '_selected_urls', set()):
+                        self._toggle_select(target_url)
+                    if hasattr(self, '_status_lbl') and self._status_lbl:
+                        self._status_lbl.configure(text=T('added_to_queue'))
+
+                ctk.CTkButton(
+                    right_btns, text=T('open_preview'), height=28, width=65,
+                    corner_radius=CONTROL_RADIUS, fg_color=ACCENT,
+                    hover_color=ACCENT_HOVER, text_color=WHITE,
+                    font=(ui_font(), 10, 'bold'),
+                    command=_open_item_preview
+                ).pack(side='left', padx=(0, 4))
+
+                ctk.CTkButton(
+                    right_btns, text='+ ' + T('add_to_queue'), height=28, width=80,
+                    corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                    border_width=1, border_color=BORDER_HOVER,
+                    hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                    font=(ui_font(), 10),
+                    command=_queue_item
+                ).pack(side='left', padx=(0, 4))
+
+                ctk.CTkButton(
+                    right_btns, text='Remove', height=28, width=60,
+                    corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                    border_width=1, border_color=BORDER_HOVER,
+                    hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                    font=(ui_font(), 10),
+                    command=_remove_item
+                ).pack(side='left')
+
+        def render_history_page(container):
+            for w in container.winfo_children():
+                w.destroy()
+
+            v_hist = config.get_view_history()
+            dl_hist = config.get_download_history()
+
+            scroll = ctk.CTkFrame(container, fg_color='transparent')
+            scroll.pack(fill='both', expand=True)
+
+            trash_icon = None
+            img_dir_dest = os.path.join(os.path.dirname(__file__), 'img')
+            t_light_p = os.path.join(img_dir_dest, 'icon_trash_light.png')
+            t_dark_p = os.path.join(img_dir_dest, 'icon_trash_dark.png')
+            if os.path.exists(t_light_p) and os.path.exists(t_dark_p):
+                trash_icon = ctk.CTkImage(
+                    light_image=Image.open(t_light_p),
+                    dark_image=Image.open(t_dark_p),
+                    size=(14, 14)
+                )
+
+            tab_bar = ctk.CTkFrame(scroll, fg_color='transparent')
+            tab_bar.pack(fill='x', pady=(0, 8))
+
+            active_tab = tk.StringVar(value='view')
+
+            def _show_view():
+                active_tab.set('view')
+                view_btn.configure(fg_color=BG_CARD_HOVER, text_color=TEXT_PRI)
+                dl_btn.configure(fg_color='transparent', text_color=TEXT_SEC)
+                view_content.pack(fill='both', expand=True)
+                dl_content.pack_forget()
+
+            def _show_download():
+                active_tab.set('download')
+                dl_btn.configure(fg_color=BG_CARD_HOVER, text_color=TEXT_PRI)
+                view_btn.configure(fg_color='transparent', text_color=TEXT_SEC)
+                dl_content.pack(fill='both', expand=True)
+                view_content.pack_forget()
+
+            view_btn = ctk.CTkButton(
+                tab_bar, text=T('recent_view_history'), width=160, height=32,
+                corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
+                command=_show_view)
+            view_btn.pack(side='left', padx=(0, 4))
+
+            def _clear_active():
+                if active_tab.get() == 'view':
+                    config.clear_view_history()
+                else:
+                    config.clear_download_history()
+                render_history_page(container)
+
+            clear_btn = ctk.CTkButton(
+                tab_bar, text=T('clear_history'), height=26, width=90,
+                corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                border_width=1, border_color=BORDER_HOVER,
+                hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                font=(ui_font(), 10), command=_clear_active
+            )
+            clear_btn.pack(side='right', padx=(8, 0))
+
+            dl_btn = ctk.CTkButton(
+                tab_bar, text=T('recent_download_history'), width=180, height=32,
+                corner_radius=CONTROL_RADIUS,
+                fg_color='transparent', hover_color=BG_CARD_HOVER,
+                text_color=TEXT_SEC, font=(ui_font(), 12),
+                command=_show_download)
+            dl_btn.pack(side='left', padx=(4, 0))
+
+            ctk.CTkFrame(scroll, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 10))
+
+            view_content = ctk.CTkFrame(scroll, fg_color='transparent')
+            dl_content = ctk.CTkFrame(scroll, fg_color='transparent')
+
+            # ── VIEW HISTORY CONTENT ─────────────────────────────────────────
+            if not v_hist:
+                empty1 = ctk.CTkFrame(view_content, fg_color=BG_CARD, corner_radius=CARD_RADIUS, border_width=1, border_color=BORDER_CARD)
+                empty1.pack(fill='both', expand=True, pady=(0, 16))
+                ctk.CTkLabel(empty1, text=T('no_history'), font=(ui_font(), 11), text_color=TEXT_SEC).pack(pady=16)
+            else:
+                card1 = ctk.CTkFrame(view_content, fg_color=BG_CARD, corner_radius=CARD_RADIUS, border_width=1, border_color=BORDER_CARD)
+                card1.pack(fill='both', expand=True, pady=(0, 16))
+
+                for idx, item in enumerate(v_hist[:30]):
+                    url = item.get('url', '')
+                    title = item.get('title') or url
+                    site_name = item.get('site_name') or ''
+
+                    row = ctk.CTkFrame(card1, fg_color='transparent')
+                    row.pack(fill='x', expand=True, padx=12, pady=8)
+
+                    left_f = ctk.CTkFrame(row, fg_color='transparent')
+                    left_f.pack(side='left', fill='both', expand=True)
+
+                    if site_name:
+                        ctk.CTkLabel(
+                            left_f, text=f"[{site_name}]", text_color=ACCENT,
+                            font=(ui_font(), 10, 'bold')).pack(side='left', padx=(0, 8))
+
+                    ctk.CTkLabel(
+                        left_f, text=title, text_color=TEXT_PRI,
+                        font=(ui_font(), 11), anchor='w', wraplength=520, justify='left').pack(side='left', fill='x', expand=True)
+
+                    right_f = ctk.CTkFrame(row, fg_color='transparent')
+                    right_f.pack(side='right', fill='y', padx=(8, 0))
+
+                    def _open_hist_item(target_item=item):
+                        self._select_tab('browse')
+                        self._open_preview(target_item)
+
+                    def _remove_view_item(target_url=url):
+                        config.remove_view_history(target_url)
+                        render_history_page(container)
+
+                    ctk.CTkButton(
+                        right_f, text=T('open_preview'), height=26, width=65,
+                        corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                        border_width=1, border_color=BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                        font=(ui_font(), 10), command=_open_hist_item
+                    ).pack(side='left', padx=(0, 4))
+
+                    ctk.CTkButton(
+                        right_f, text='', height=26, width=32,
+                        corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                        border_width=1, border_color=BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                        image=trash_icon, command=_remove_view_item
+                    ).pack(side='left')
+
+                    if idx < len(v_hist[:30]) - 1:
+                        ctk.CTkFrame(card1, height=1, fg_color=BORDER_CARD).pack(fill='x', padx=12)
+
+            # ── DOWNLOAD HISTORY CONTENT ────────────────────────────────────
+            if not dl_hist:
+                empty2 = ctk.CTkFrame(dl_content, fg_color=BG_CARD, corner_radius=CARD_RADIUS, border_width=1, border_color=BORDER_CARD)
+                empty2.pack(fill='both', expand=True, pady=(0, 16))
+                ctk.CTkLabel(empty2, text=T('no_history'), font=(ui_font(), 11), text_color=TEXT_SEC).pack(pady=16)
+            else:
+                card2 = ctk.CTkFrame(dl_content, fg_color=BG_CARD, corner_radius=CARD_RADIUS, border_width=1, border_color=BORDER_CARD)
+                card2.pack(fill='both', expand=True, pady=(0, 16))
+
+                for idx, item in enumerate(dl_hist[:30]):
+                    url = item.get('url', '')
+                    name = item.get('name') or url
+                    dest = item.get('dest') or ''
+                    state = state_label(item.get('state') or 'DOWNLOADED')
+
+                    row = ctk.CTkFrame(card2, fg_color='transparent')
+                    row.pack(fill='x', expand=True, padx=12, pady=8)
+
+                    left_f = ctk.CTkFrame(row, fg_color='transparent')
+                    left_f.pack(side='left', fill='both', expand=True)
+
+                    ctk.CTkLabel(
+                        left_f, text=f"[{state}]", text_color=SUCCESS,
+                        font=(ui_font(), 10, 'bold')).pack(side='left', padx=(0, 8))
+
+                    ctk.CTkLabel(
+                        left_f, text=name, text_color=TEXT_PRI,
+                        font=(ui_font(), 11), anchor='w', wraplength=400, justify='left').pack(side='left', fill='x', expand=True)
+
+                    right_f = ctk.CTkFrame(row, fg_color='transparent')
+                    right_f.pack(side='right', fill='y', padx=(8, 0))
+
+                    def _locate_dl_item(target_dest=dest, target_name=name):
+                        if not target_dest:
+                            messagebox.showinfo('Locate', 'No destination folder recorded for this item.')
+                            return
+                        folder = os.path.abspath(target_dest)
+                        if not os.path.isdir(folder):
+                            messagebox.showinfo('Locate', 'Destination folder no longer exists.')
+                            return
+                        expected = os.path.join(folder, target_name + '.mp4')
+                        if os.path.exists(expected):
+                            import subprocess, platform
+                            system = platform.system()
+                            try:
+                                if system == 'Windows':
+                                    subprocess.Popen(['explorer', '/select,', expected])
+                                elif system == 'Darwin':
+                                    subprocess.Popen(['open', '-R', expected])
+                                else:
+                                    subprocess.Popen(['xdg-open', folder])
+                            except OSError as e:
+                                messagebox.showerror(T('open_folder_failed_title'), str(e))
+                        else:
+                            messagebox.showinfo('Locate', 'File is not present in the destination folder.')
+
+                    def _remove_dl_item(target_url=url):
+                        config.remove_download_history(target_url)
+                        render_history_page(container)
+
+                    ctk.CTkButton(
+                        right_f, text='Locate', height=26, width=60,
+                        corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                        border_width=1, border_color=BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                        font=(ui_font(), 10), command=_locate_dl_item
+                    ).pack(side='left', padx=(0, 4))
+
+                    ctk.CTkButton(
+                        right_f, text='', height=26, width=32,
+                        corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                        border_width=1, border_color=BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                        image=trash_icon, command=_remove_dl_item
+                    ).pack(side='left')
+
+                    if idx < len(dl_hist[:30]) - 1:
+                        ctk.CTkFrame(card2, height=1, fg_color=BORDER_CARD).pack(fill='x', padx=12)
+
+            view_content.pack(fill='both', expand=True)
+            dl_content.pack_forget()
+
         self._settings_page_renderers = {
+            'saved': render_saved_page,
+            'history': render_history_page,
             'update': render_update_page,
+            'subtitle': render_subtitle_page,
             'download': render_download_page,
             'proxy': render_proxy_page,
             'cf': render_cf_page,
             'queue': render_queue_page,
+            'customized': render_customized_page,
             'about': render_about_page,
         }
 
-        # Navigation Categories with icons
+        # Navigation Categories
         self._settings_categories = [
-            ('update', '🔄', T('update_settings_title') if 'update_settings_title' in T.__code__.co_varnames else 'Update'),
-            ('download', '↓', T('download_settings')),
-            ('proxy', '🌐', T('proxy_card_title')),
-            ('cf', '🛡️', T('cf_card_title')),
-            ('queue', '📋', T('queue_settings_title') if 'queue_settings_title' in T.__code__.co_varnames else 'Save Download Queue'),
-            ('about', 'ℹ️', 'About')
+            ('update', '', T('update_settings_title') if 'update_settings_title' in T.__code__.co_varnames else 'Update'),
+            ('saved', '', T('saved_settings_title') if 'saved_settings_title' in T.__code__.co_varnames else 'Saved'),
+            ('history', '', T('history_settings_title')),
+            ('download', '', T('download_settings')),
+            ('subtitle', '', T('subtitle_settings_title') if 'subtitle_settings_title' in T.__code__.co_varnames else 'Subtitles & AI'),
+            ('proxy', '', T('proxy_card_title')),
+            ('cf', '', T('cf_card_title')),
+            ('queue', '', T('queue_settings_title') if 'queue_settings_title' in T.__code__.co_varnames else 'Save Download Queue'),
+            ('customized', '', 'Customized'),
+            ('about', '', 'About')
         ]
 
         self._settings_nav_btns = {}
@@ -3669,8 +4527,9 @@ class ModernApp(ctk.CTk):
         self._settings_left_nav = left_nav
 
         for cat_key, cat_icon, cat_label in self._settings_categories:
+            nav_text = f"{cat_icon}  {cat_label}".strip() if cat_icon else f"  {cat_label}"
             btn = ctk.CTkButton(
-                left_nav, text=f"{cat_icon}  {cat_label}",
+                left_nav, text=nav_text,
                 fg_color=BG_CARD_HOVER if cat_key == 'update' else 'transparent',
                 hover_color=BG_CARD_HOVER,
                 text_color=TEXT_PRI if cat_key == 'update' else TEXT_SEC,
@@ -3682,8 +4541,12 @@ class ModernApp(ctk.CTk):
             self._settings_nav_btns[cat_key] = btn
 
         # Display initial category and align responsive layout
+        stored_accent = config.get_accent_color()
+        if stored_accent:
+            apply_accent_color(stored_accent)
         self._switch_settings_cat('update')
         self._update_responsive_nav()
+        self.after(80, _refresh_accent_widgets)
 
     def _switch_settings_cat(self, selected_cat: str):
         self._active_settings_cat = selected_cat
@@ -3866,20 +4729,24 @@ class ModernApp(ctk.CTk):
                          font=(ui_font(), 14)).pack(pady=40)
             return
 
-        # Responsive card density: 2 compact / 3 default / 4 wide.
-        columns = max(2, self._grid_columns)
+        # Responsive card density: 1 narrow / 2 compact / 3 default / 4 wide.
+        columns = max(1, self._grid_columns)
         try:
             logical_width = self.winfo_width() / max(self._get_window_scaling(), 1.0)
         except Exception:
             logical_width = self.winfo_width()
         estimated_card_width = max(
-            240, int((max(logical_width, 980) - 240) / columns) - 24)
-        title_wrap = max(180, min(330, estimated_card_width - 34))
+            200, int((max(logical_width, 750) - 240) / columns) - 24)
+        self._last_estimated_cw = estimated_card_width
+        title_wrap = max(160, min(330, estimated_card_width - 34))
         row_frame = None
         for i, v in enumerate(self._videos):
-            if i % columns == 0:
+            col_idx = i % columns
+            if col_idx == 0:
                 row_frame = ctk.CTkFrame(self._grid_scroll, fg_color='transparent')
                 row_frame.pack(fill='x', padx=8, pady=4)
+                for c in range(columns):
+                    row_frame.grid_columnconfigure(c, weight=1, uniform='browse_cols')
 
             url = v.get('url', '')
             title = v.get('title', '')
@@ -3887,60 +4754,67 @@ class ModernApp(ctk.CTk):
             thumb_url = v.get('thumbnail', '')
             is_sel = url in self._selected_urls
 
-            card = ctk.CTkFrame(row_frame, fg_color=ACCENT_DIM if is_sel else BG_CARD,
+            card = ctk.CTkFrame(row_frame, fg_color=BG_CARD,
                                 corner_radius=CARD_RADIUS,
                                 border_width=2 if is_sel else 1,
                                 border_color=ACCENT if is_sel else BORDER_CARD)
-            card.pack(side='left', padx=4, pady=4, fill='x', expand=True)
+            card.grid(row=0, column=col_idx, padx=6, pady=6, sticky='nsew')
 
-            # Thumbnail placeholder (16:9)
+            # ── Full-bleed thumbnail ──
             thumb_holder = ctk.CTkFrame(card, fg_color=BG_SIDEBAR,
-                                         height=_THUMB_SIZE[1] + 11, corner_radius=6)
-            thumb_holder.pack(fill='x', padx=8, pady=(10, 0))
-            thumb_holder.pack_propagate(False)
+                                         corner_radius=CARD_RADIUS,
+                                         border_width=1,
+                                         border_color=BORDER_HOVER)
+            thumb_holder.pack(fill='x', padx=6, pady=(6, 0))
+            # 5% taller thumbnail placeholder before image loads
             thumb_lbl = ctk.CTkLabel(thumb_holder, text=T('loading_browse'),
                                       text_color=TEXT_DIM,
                                       fg_color='transparent',
-                                      font=(ui_font(), 11))
-            thumb_lbl.pack(fill='both', expand=True)
+                                      font=(ui_font(), 10),
+                                      height=168)
+            thumb_lbl.pack(fill='x')
 
-            # Duration badge
+            # Duration badge — bottom-right of thumbnail
             if dur:
                 dur_lbl = ctk.CTkLabel(thumb_holder, text=f' {dur} ',
                                         text_color='#FFFFFF',
                                         fg_color='#000000',
                                         corner_radius=4,
-                                        font=('Consolas', 9, 'bold'))
+                                        font=('Consolas', 8, 'bold'))
                 dur_lbl.place(relx=1.0, rely=1.0, anchor='se', x=-6, y=-6)
 
-            # Title
-            title_text = title[:72] + '...' if len(title) > 72 else title
+            # ── Title (clean 2-line max) ──
+            title_text = title[:65] + '…' if len(title) > 65 else title
             ctk.CTkLabel(card, text=title_text, text_color=TEXT_PRI,
-                         font=(ui_font(), 10),
-                         wraplength=title_wrap, justify='left').pack(
-                             fill='x', padx=10, pady=(10, 12), anchor='w')
+                         font=(ui_font(), 11),
+                         wraplength=title_wrap, justify='left',
+                         anchor='nw').pack(
+                             fill='x', padx=10, pady=(7, 5), anchor='w')
 
-            # Bottom row
+            # ── Action buttons: Save (heart) · Preview · Select (inline) ──
             bottom = ctk.CTkFrame(card, fg_color='transparent')
-            bottom.pack(fill='x', padx=8, pady=(4, 12))
+            bottom.pack(fill='x', padx=8, pady=(0, 9))
 
-            sel_text = ('✓ ' + T('selected')) if is_sel else T('select')
-            sel_btn = ctk.CTkButton(
-                bottom, text=sel_text, height=27, width=88,
-                corner_radius=CONTROL_RADIUS,
-                fg_color=ACCENT if is_sel else 'transparent',
-                border_width=0 if is_sel else 1,
-                border_color=BORDER_HOVER,
-                hover_color=ACCENT_HOVER if is_sel else BG_CARD_HOVER,
-                text_color=('#FFFFFF', '#FFFFFF') if is_sel else TEXT_PRI,
-                font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10),
-                command=lambda u=url: self._toggle_select(u)
+            is_card_saved = config.is_video_saved(url)
+            card_heart_img = getattr(self, '_heart_active_icon', None) if is_card_saved else getattr(self, '_heart_icon', None)
+            card_heart_text = '' if card_heart_img else ('♥' if is_card_saved else '♡')
+
+            card_heart_btn = ctk.CTkButton(
+                bottom, text=card_heart_text, image=card_heart_img,
+                width=30, height=30,
+                corner_radius=15,
+                fg_color='transparent',
+                border_width=1,
+                border_color=ACCENT if is_card_saved else BORDER_HOVER,
+                hover_color=BG_CARD_HOVER,
+                text_color=ACCENT if is_card_saved else TEXT_PRI,
+                command=lambda video=v, u=url: self._on_card_heart_click(video, u)
             )
-            sel_btn.pack(side='right', padx=(4, 0))
+            card_heart_btn.pack(side='left', padx=(0, 4))
 
             preview_btn = ctk.CTkButton(
-                bottom, text=T('preview'), height=27, width=75,
-                corner_radius=CONTROL_RADIUS,
+                bottom, text=T('preview'), height=30,
+                corner_radius=15,
                 fg_color='transparent',
                 border_width=1,
                 border_color=BORDER_HOVER,
@@ -3949,9 +4823,23 @@ class ModernApp(ctk.CTk):
                 font=(ui_font(), 10),
                 command=lambda video=v: self._open_preview(video)
             )
-            preview_btn.pack(side='right', padx=(0, 4))
+            preview_btn.pack(side='left', fill='x', expand=True, padx=(0, 4))
 
-            self._card_widgets[url] = {'card': card, 'sel_btn': sel_btn, 'preview_btn': preview_btn}
+            sel_text = ('✓ ' + T('selected')) if is_sel else T('select')
+            sel_btn = ctk.CTkButton(
+                bottom, text=sel_text, height=30,
+                corner_radius=15,
+                fg_color=ACCENT if is_sel else 'transparent',
+                border_width=0 if is_sel else 1,
+                border_color=BORDER_HOVER,
+                hover_color=ACCENT_HOVER if is_sel else BG_CARD_HOVER,
+                text_color=('#FFFFFF', '#FFFFFF') if is_sel else TEXT_PRI,
+                font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10),
+                command=lambda u=url: self._toggle_select(u)
+            )
+            sel_btn.pack(side='left', fill='x', expand=True, padx=(0, 0))
+
+            self._card_widgets[url] = {'card': card, 'sel_btn': sel_btn, 'preview_btn': preview_btn, 'heart_btn': card_heart_btn}
 
             # Clickable card
             def _bind_click(widget, video_url=url):
@@ -3974,13 +4862,16 @@ class ModernApp(ctk.CTk):
         main thread via .after() so Tk widget updates stay thread-safe.
         The gen counter prevents stale thumbs from polluting a newer page."""
         def _worker():
-            if self._is_closing or gen != self._grid_gen or build_gen != self._build_gen:
+            if self._is_closing or build_gen != self._build_gen:
+                return
+            if gen != self._grid_gen and gen != getattr(self, '_preview_gen', -1):
                 return
             img = _fetch_thumbnail(thumb_url, site_key)
             if img is None:
                 def _apply_missing():
-                    if (self._is_closing or gen != self._grid_gen or
-                            build_gen != self._build_gen):
+                    if self._is_closing or build_gen != self._build_gen:
+                        return
+                    if gen != self._grid_gen and gen != getattr(self, '_preview_gen', -1):
                         return
                     try:
                         if label.winfo_exists():
@@ -3991,41 +4882,44 @@ class ModernApp(ctk.CTk):
                 return
             # Only apply if this label is still part of the current page.
             def _apply():
-                if self._is_closing or gen != self._grid_gen or build_gen != self._build_gen:
+                if self._is_closing or build_gen != self._build_gen:
+                    return
+                if gen != self._grid_gen and gen != getattr(self, '_preview_gen', -1):
                     return
                 try:
                     if not label.winfo_exists():
                         return
                     holder = label.master
-                    cw = max(holder.winfo_width(), 100) if (holder and holder.winfo_exists()) else 300
-                    ch = max(holder.winfo_height(), 50) if (holder and holder.winfo_exists()) else 180
-                    if cw <= 1:
-                        cw = 300
-                    if ch <= 1:
-                        ch = 180
+                    cw = holder.winfo_width() if (holder and holder.winfo_exists()) else 0
+                    if cw <= 4:
+                        cw = int(getattr(self, '_last_estimated_cw', 260))  # fallback before layout is realised
                     label._raw_img = img
-                    label._last_w = cw
-                    label._last_h = ch
-                    fitted_img, nw, nh = _fit_image(img, cw, ch)
-                    ctk_img = ctk.CTkImage(light_image=fitted_img, dark_image=fitted_img, size=(nw, nh))
-                    label.configure(image=ctk_img, text='')
-                    label._ctk_img_ref = ctk_img
 
+                    # Height-fitted image rendering (image height 100% matches thumbnail view section height)
+                    target_ch = max(1, min(190, int(round(cw * 0.61))))
+                    ctk_img = _create_height_fitted_hd_ctk_image(img, cw, target_ch)
+                    label.configure(image=ctk_img, text='', height=target_ch)
+                    label._ctk_img_ref = ctk_img
+                    label._last_w = cw
+
+                    # Re-scale on card width change keeping image height 100% matched to thumbnail viewer height
                     if not getattr(label, '_has_resize_bind', False) and holder and holder.winfo_exists():
                         label._has_resize_bind = True
                         def _on_resize(event):
                             if not label.winfo_exists():
                                 return
-                            w, h = event.width, event.height
-                            if w > 10 and h > 10 and (getattr(label, '_last_w', 0) != w or getattr(label, '_last_h', 0) != h):
+                            w = event.width
+                            if w > 4 and getattr(label, '_last_w', 0) != w:
                                 label._last_w = w
-                                label._last_h = h
                                 raw = getattr(label, '_raw_img', None)
                                 if raw:
-                                    f_img, fw, fh = _fit_image(raw, w, h)
-                                    ci = ctk.CTkImage(light_image=f_img, dark_image=f_img, size=(fw, fh))
-                                    label.configure(image=ci)
-                                    label._ctk_img_ref = ci
+                                    tch = max(1, min(190, int(round(w * 0.61))))
+                                    ci = _create_height_fitted_hd_ctk_image(raw, w, tch)
+                                    try:
+                                        label.configure(image=ci, height=tch)
+                                        label._ctk_img_ref = ci
+                                    except Exception:
+                                        pass
                         holder.bind('<Configure>', _on_resize, add='+')
                 except Exception:
                     pass
@@ -4061,7 +4955,7 @@ class ModernApp(ctk.CTk):
             is_sel = url in self._selected_urls
             try:
                 w['card'].configure(
-                    fg_color=ACCENT_DIM if is_sel else BG_CARD,
+                    fg_color=BG_CARD,
                     border_width=2 if is_sel else 1,
                     border_color=ACCENT if is_sel else BORDER_CARD)
                 w['sel_btn'].configure(
@@ -4074,6 +4968,401 @@ class ModernApp(ctk.CTk):
             except Exception:
                 pass
         self._update_selection_count()
+
+    def _animate_heart_btn(self, btn, is_saved: bool):
+        if not btn:
+            return
+        try:
+            if not btn.winfo_exists():
+                return
+        except Exception:
+            return
+
+        h_img = getattr(self, '_heart_active_icon', None) if is_saved else getattr(self, '_heart_icon', None)
+        h_txt = '' if h_img else ('♥' if is_saved else '♡')
+
+        if is_saved:
+            try:
+                btn.configure(
+                    fg_color=ACCENT,
+                    border_color=ACCENT,
+                    text_color=WHITE,
+                    text='' if h_img else '💖',
+                    image=h_img
+                )
+            except Exception:
+                pass
+
+            def _step2():
+                try:
+                    if btn.winfo_exists():
+                        btn.configure(
+                            fg_color='transparent',
+                            border_color=ACCENT,
+                            text_color=ACCENT,
+                            text=h_txt,
+                            image=h_img
+                        )
+                except Exception:
+                    pass
+
+            self.after(150, _step2)
+        else:
+            try:
+                btn.configure(
+                    fg_color=BG_CARD_HOVER,
+                    border_color=BORDER,
+                    text_color=TEXT_DIM,
+                    text=h_txt,
+                    image=h_img
+                )
+            except Exception:
+                pass
+
+            def _step2_off():
+                try:
+                    if btn.winfo_exists():
+                        btn.configure(
+                            fg_color='transparent',
+                            border_color=BORDER_HOVER,
+                            text_color=TEXT_PRI,
+                            text=h_txt,
+                            image=h_img
+                        )
+                except Exception:
+                    pass
+
+            self.after(150, _step2_off)
+
+    def _update_preview_action_buttons(self):
+        if getattr(self, '_browse_mode', '') != 'preview':
+            return
+        preview_source = getattr(self, '_preview_source', None)
+        url = (preview_source.page_url if preview_source else '') or (getattr(self, '_preview_video', {}) or {}).get('url', '')
+        if not url:
+            return
+
+        items = getattr(self, '_dlmgr').get_items() if hasattr(self, '_dlmgr') else []
+        dl_item = next((i for i in items if i.url == url), None)
+
+        q_btn = getattr(self, '_preview_q_btn', None)
+        dl_btn = getattr(self, '_preview_dl_btn', None)
+
+        # Check if item is enqueued/actively downloading
+        is_enqueued = False
+        if dl_item is not None:
+            is_active = (hasattr(self._dlmgr, '_active') and url in self._dlmgr._active)
+            is_pending = (hasattr(self._dlmgr, '_pending') and any(t.url == url for t in self._dlmgr._pending))
+            is_dl_state = (dl_item.state in ('下載中', '準備中', '字幕準備中', '字幕辨識中', '字幕翻譯中', '已下載'))
+            is_enqueued = is_active or is_pending or is_dl_state
+
+        # Green "Download Selected" style tokens for active/queued state
+        GREEN_BG = SUCCESS_DIM
+        GREEN_BORDER = SUCCESS
+        GREEN_HOVER = ('#D4EAD9', '#254A36')
+        GREEN_TEXT = SUCCESS
+
+        # Accent "Download Selected" style tokens for idle download button
+        _acc = ACCENT[0] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
+        _acc_dark = ACCENT[1] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
+        ACCENT_BG = (_dim_color(_acc, '#FFFFFF', 0.12), _dim_color(_acc_dark, '#16161B', 0.18))
+        ACCENT_BORDER = ACCENT
+        ACCENT_HOVER_COLOR = (_brighten(ACCENT_BG[0], 1.08), _brighten(ACCENT_BG[1], 1.08))
+        ACCENT_TEXT = ACCENT
+
+        # 1. Update Add to Queue Button: Green "Download Selected" style when queued, outline when not.
+        if q_btn:
+            try:
+                if q_btn.winfo_exists():
+                    if dl_item is not None:
+                        q_btn.configure(
+                            text=' ' + T('add_to_queue'),
+                            image=getattr(self, '_plus_icon', None),
+                            fg_color=GREEN_BG,
+                            border_width=1,
+                            border_color=GREEN_BORDER,
+                            hover_color=GREEN_HOVER,
+                            text_color=GREEN_TEXT,
+                            width=110,
+                            font=(ui_font(), 10, 'bold')
+                        )
+                    else:
+                        q_btn.configure(
+                            text=' ' + T('add_to_queue'),
+                            image=getattr(self, '_plus_icon', None),
+                            fg_color='transparent',
+                            border_width=1,
+                            border_color=BORDER_HOVER,
+                            hover_color=BG_CARD_HOVER,
+                            text_color=TEXT_PRI,
+                            width=110,
+                            font=(ui_font(), 10)
+                        )
+            except Exception:
+                pass
+
+        # 2. Update Download Button: Green "Download Selected" style with "Downloading (52%)" WITHOUT ICON when downloading/enqueued!
+        if dl_btn:
+            try:
+                if dl_btn.winfo_exists():
+                    if is_enqueued and dl_item is not None:
+                        st = dl_item.progress
+                        state = dl_item.state
+                        if state == '已下載':
+                            dl_btn.configure(
+                                text=f"{T('download_btn')} (100%)",
+                                image=None,
+                                fg_color=GREEN_BG,
+                                border_width=1,
+                                border_color=GREEN_BORDER,
+                                hover_color=GREEN_HOVER,
+                                text_color=GREEN_TEXT,
+                                width=130,
+                                font=(ui_font(), 10, 'bold')
+                            )
+                        else:
+                            pct = max(0, min(100, int(st)))
+                            dl_text = f"{T('preview_downloading')} ({pct}%)"
+                            dl_btn.configure(
+                                text=dl_text,
+                                image=None,  # No icon inside download button when downloading!
+                                fg_color=GREEN_BG,
+                                border_width=1,
+                                border_color=GREEN_BORDER,
+                                hover_color=GREEN_HOVER,
+                                text_color=GREEN_TEXT,
+                                width=140,
+                                font=(ui_font(), 10, 'bold')
+                            )
+                    else:
+                        dl_btn.configure(
+                            text=' ' + T('download_btn'),
+                            image=getattr(self, '_dl_icon', None),
+                            fg_color=ACCENT_BG,
+                            border_width=1,
+                            border_color=ACCENT_BORDER,
+                            hover_color=ACCENT_HOVER_COLOR,
+                            text_color=ACCENT_TEXT,
+                            width=110,
+                            font=(ui_font(), 10, 'bold')
+                        )
+            except Exception:
+                pass
+
+    def _update_preview_layout(self, logical_width: float):
+        if getattr(self, '_browse_mode', '') != 'preview':
+            return
+
+        left_main = getattr(self, '_preview_left_main', None)
+        right_sidebar = getattr(self, '_preview_right_sidebar', None)
+        bottom_container = getattr(self, '_preview_bottom_related', None)
+        related_vids = getattr(self, '_preview_related_vids', [])
+
+        if not left_main or not right_sidebar or not bottom_container or not related_vids:
+            return
+
+        if logical_width >= 1050:
+            target_mode = 'side_by_side'
+            target_cols = 1
+        elif logical_width >= 850:
+            target_mode = 'bottom_grid'
+            target_cols = 3
+        elif logical_width >= 600:
+            target_mode = 'bottom_grid'
+            target_cols = 2
+        else:
+            target_mode = 'bottom_grid'
+            target_cols = 1
+
+        curr_mode = getattr(self, '_preview_layout_mode', None)
+        curr_cols = getattr(self, '_preview_layout_cols', None)
+
+        if curr_mode == target_mode and curr_cols == target_cols:
+            return
+
+        self._preview_layout_mode = target_mode
+        self._preview_layout_cols = target_cols
+
+        # Clear existing children of right_sidebar and bottom_container
+        for w in list(right_sidebar.winfo_children()):
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        for w in list(bottom_container.winfo_children()):
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        if target_mode == 'side_by_side':
+            right_sidebar.pack_configure(side='right', fill='y', anchor='n', padx=(0, 24))
+            ctk.CTkLabel(
+                right_sidebar, text='Related Videos', text_color=TEXT_PRI,
+                font=(ui_font(), 14, 'bold')).pack(anchor='w', padx=10, pady=(0, 10))
+            for rv in related_vids:
+                self._render_single_related_card(right_sidebar, rv, is_grid=False)
+        else:
+            right_sidebar.pack_forget()
+            hdr_frame = ctk.CTkFrame(bottom_container, fg_color='transparent')
+            hdr_frame.pack(fill='x', pady=(12, 8))
+            ctk.CTkLabel(
+                hdr_frame, text='Related Videos', text_color=TEXT_PRI,
+                font=(ui_font(), 14, 'bold')).pack(side='left')
+
+            grid_frame = ctk.CTkFrame(bottom_container, fg_color='transparent')
+            grid_frame.pack(fill='x', pady=(0, 16))
+
+            row_frame = None
+            for idx, rv in enumerate(related_vids):
+                col_idx = idx % target_cols
+                if col_idx == 0:
+                    row_frame = ctk.CTkFrame(grid_frame, fg_color='transparent')
+                    row_frame.pack(fill='x', pady=4)
+                    for c in range(target_cols):
+                        row_frame.grid_columnconfigure(c, weight=1, uniform='rel_cols')
+                self._render_single_related_card(row_frame, rv, is_grid=True, cols=target_cols, col_idx=col_idx)
+
+    def _render_single_related_card(self, parent, rv: dict, is_grid: bool = False, cols: int = 1, col_idx: int = 0):
+        r_url = rv.get('url', '')
+        r_title = rv.get('title', '')
+        r_dur = rv.get('duration', '')
+        r_thumb = rv.get('thumbnail', '')
+        r_is_sel = r_url in getattr(self, '_selected_urls', set())
+
+        rcard = ctk.CTkFrame(
+            parent, fg_color=BG_CARD,
+            corner_radius=CARD_RADIUS,
+            border_width=2 if r_is_sel else 1,
+            border_color=ACCENT if r_is_sel else BORDER_CARD)
+
+        if is_grid:
+            rcard.grid(row=0, column=col_idx, padx=4, pady=4, sticky='nsew')
+            img_height = 115 if cols == 3 else (135 if cols == 2 else 155)
+            wrap_w = 200 if cols == 3 else (310 if cols == 2 else 540)
+        else:
+            rcard.pack(fill='x', padx=2, pady=6)
+            img_height = 180
+            wrap_w = 320
+
+        # Top Preview Image Container (framed preview holder)
+        rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=img_height, corner_radius=6)
+        rthumb_holder.pack(fill='x', padx=6, pady=(6, 0))
+        rthumb_holder.pack_propagate(False)
+
+        rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
+        rlbl.pack(fill='both', expand=True)
+        if r_thumb:
+            self._load_thumb_async(r_thumb, rlbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
+
+        if r_dur:
+            ctk.CTkLabel(
+                rthumb_holder, text=f' {r_dur} ', text_color=WHITE, fg_color='#000000',
+                corner_radius=4, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
+
+        # Details Section
+        rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
+        rinfo.pack(fill='x', padx=8, pady=(6, 8))
+
+        ctk.CTkLabel(
+            rinfo, text=r_title, text_color=TEXT_PRI,
+            font=(ui_font(), 10, 'bold'), wraplength=wrap_w, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
+
+        rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
+        rbadges.pack(anchor='w', fill='x')
+
+        ctk.CTkLabel(
+            rbadges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
+            fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
+            font=(ui_font(), 9, 'bold')).pack(side='left', padx=(0, 6))
+
+        ctk.CTkLabel(
+            rbadges, text='1080p', text_color=TEXT_DIM,
+            fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
+            font=(ui_font(), 9)).pack(side='left')
+
+        r_is_saved = config.is_video_saved(r_url)
+        r_heart_img = getattr(self, '_heart_active_icon', None) if r_is_saved else getattr(self, '_heart_icon', None)
+        r_heart_text = '' if r_heart_img else ('♥' if r_is_saved else '♡')
+
+        r_heart_btn = ctk.CTkButton(
+            rbadges, text=r_heart_text, image=r_heart_img,
+            width=24, height=22, corner_radius=4,
+            fg_color='transparent',
+            border_width=1, border_color=ACCENT if r_is_saved else BORDER_HOVER,
+            hover_color=BG_CARD_HOVER, text_color=ACCENT if r_is_saved else TEXT_PRI,
+            command=lambda item=rv, u=r_url: self._on_card_heart_click(item, u)
+        )
+        r_heart_btn.pack(side='right')
+
+        def _bind_rv(widget, item=rv, frame=rcard, sel=r_is_sel):
+            widget.bind('<Button-1>', lambda e: self._open_preview(item))
+            widget.configure(cursor='hand2')
+            def _on_enter(e):
+                if not sel:
+                    frame.configure(border_color=BORDER_HOVER)
+            def _on_leave(e):
+                if not sel:
+                    frame.configure(border_color=BORDER_CARD)
+            try:
+                widget.bind('<Enter>', _on_enter, add='+')
+                widget.bind('<Leave>', _on_leave, add='+')
+            except Exception:
+                pass
+
+        _bind_rv(rcard)
+        _bind_rv(rthumb_holder)
+        _bind_rv(rlbl)
+        _bind_rv(rinfo)
+
+    def _on_card_heart_click(self, video: dict, url: str):
+        target_url = url or (video or {}).get('url') or (video or {}).get('page_url') or ''
+        if not target_url:
+            return
+        v_info = {
+            'url': target_url,
+            'title': (video or {}).get('title', '') or target_url,
+            'thumbnail': (video or {}).get('thumbnail', '') or (video or {}).get('img', ''),
+            'duration': (video or {}).get('duration', ''),
+            'site_name': (video or {}).get('site_name', '') or config.site_name_from_url(target_url),
+        }
+        new_saved = config.toggle_saved_video(v_info)
+        if hasattr(self, '_status_lbl') and self._status_lbl:
+            self._status_lbl.configure(text=T('video_saved_toast') if new_saved else T('video_removed_toast'))
+
+        self._update_card_heart_btn(target_url, animate=True)
+
+        if getattr(self, '_browse_mode', '') == 'preview' and getattr(self, '_preview_source', None):
+            if self._preview_source.page_url == target_url:
+                p_btn = getattr(self, '_preview_heart_btn', None)
+                if p_btn:
+                    self._animate_heart_btn(p_btn, new_saved)
+
+        if getattr(self, '_active_settings_cat', '') == 'saved':
+            self._switch_settings_cat('saved')
+
+    def _update_card_heart_btn(self, url: str, animate: bool = True):
+        w = getattr(self, '_card_widgets', {}).get(url)
+        if not w or 'heart_btn' not in w:
+            return
+        btn = w['heart_btn']
+        is_s = config.is_video_saved(url)
+        if animate:
+            self._animate_heart_btn(btn, is_s)
+        else:
+            try:
+                h_img = getattr(self, '_heart_active_icon', None) if is_s else getattr(self, '_heart_icon', None)
+                h_txt = '' if h_img else ('♥' if is_s else '♡')
+                btn.configure(
+                    image=h_img,
+                    text=h_txt,
+                    fg_color='transparent',
+                    border_color=ACCENT if is_s else BORDER_HOVER,
+                    text_color=ACCENT if is_s else TEXT_PRI
+                )
+            except Exception:
+                pass
 
     def _update_selection_count(self):
         n = len(self._selected_urls)
@@ -4093,7 +5382,7 @@ class ModernApp(ctk.CTk):
             return
         try:
             w['card'].configure(
-                fg_color=ACCENT_DIM if is_sel else BG_CARD,
+                fg_color=BG_CARD,
                 border_width=2 if is_sel else 1,
                 border_color=ACCENT if is_sel else BORDER_CARD)
             w['sel_btn'].configure(
@@ -4160,6 +5449,10 @@ class ModernApp(ctk.CTk):
                     if c['name'] == val), -1)
         if idx < 0:
             return
+        if getattr(self, '_tab_keys', ['browse'])[getattr(self, '_active_tab_idx', 0)] != 'browse':
+            self._select_tab('browse')
+        if getattr(self, '_browse_mode', 'grid') != 'grid':
+            self._set_browse_mode('grid')
         self._active_tag_slug = None
         self._active_tag_url = None
         self._current_base_url = self._categories[idx]['url']
@@ -4178,6 +5471,10 @@ class ModernApp(ctk.CTk):
         q = (self._search_entry.get() if hasattr(self, '_search_entry') and self._search_entry else (self._search_var.get() if hasattr(self, '_search_var') else '')).strip()
         if not q:
             return
+        if getattr(self, '_tab_keys', ['browse'])[getattr(self, '_active_tab_idx', 0)] != 'browse':
+            self._select_tab('browse')
+        if getattr(self, '_browse_mode', 'grid') != 'grid':
+            self._set_browse_mode('grid')
         from urllib.parse import quote
         if self._site_key == 'JableTV':
             # JableTV does not expose language-specific listing/search variants.
@@ -4202,6 +5499,10 @@ class ModernApp(ctk.CTk):
         self._load_page()
 
     def _on_tag_click(self, url: str, name: str, slug: str = ''):
+        if getattr(self, '_tab_keys', ['browse'])[getattr(self, '_active_tab_idx', 0)] != 'browse':
+            self._select_tab('browse')
+        if getattr(self, '_browse_mode', 'grid') != 'grid':
+            self._set_browse_mode('grid')
         self._active_tag_slug = slug
         self._active_tag_url = url
         self._current_base_url = url
@@ -4821,6 +6122,7 @@ class ModernApp(ctk.CTk):
                 parts.append(f'{state_label("已下載")} {done}')
             self._status_lbl.configure(text='  |  '.join(parts) if parts else T('status_ready'))
             self._autosave_downloads(items)
+            self._update_preview_action_buttons()
         except Exception as e:
             print(f'[download refresh failed] {e}', flush=True)
         finally:
@@ -4844,6 +6146,9 @@ class ModernApp(ctk.CTk):
         try:
             self._dlmgr.save_csv(CSV_PATH)
             self._last_download_save_sig = sig
+            for i in items:
+                if i.state in ('已下載', '未偵測到日語語音'):
+                    config.add_download_history({'url': i.url, 'name': i.name, 'state': i.state, 'dest': i.dest})
         except Exception:
             pass
 
