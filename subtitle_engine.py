@@ -1434,6 +1434,7 @@ def _extract_audio(video_path: str, wav_path: str, log_path: str,
         _run_process([
             ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
             '-i', video_path, '-vn', '-ac', '1', '-ar', '16000',
+            '-af', 'aresample=async=1:first_pts=0',
             '-c:a', 'pcm_s16le', wav_path,
         ], log_path, cancel_check,
             disk_guard_path=os.path.dirname(wav_path),

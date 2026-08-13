@@ -15,6 +15,17 @@ MIRRORS = {
     'supjav': ['supjav.com'],
 }
 
+
+def site_name_from_url(url: str) -> str:
+    host = (urlsplit(url or '').netloc or '').lower()
+    if 'jable' in host or 'fs1.app' in host:
+        return 'JableTV'
+    if 'missav' in host:
+        return 'MissAV'
+    if 'supjav' in host:
+        return 'SupJav'
+    return host or 'Video'
+
 _cf_lock = threading.Lock()
 _prefs_lock = threading.Lock()
 _proxy_lock = threading.Lock()
@@ -94,26 +105,6 @@ def set_theme(mode):
         with _prefs_lock:
             prefs = _load_prefs()
             prefs['theme'] = mode
-            _save_prefs(prefs)
-    except Exception:
-        pass
-
-
-def get_accent_color():
-    color = _load_prefs().get('accent_color')
-    if isinstance(color, str) and re.fullmatch(r'#[0-9A-Fa-f]{6}', color):
-        return color
-    return None
-
-
-def set_accent_color(hex_color):
-    hex_color = (hex_color or '').strip()
-    if not re.fullmatch(r'#[0-9A-Fa-f]{6}', hex_color):
-        return
-    try:
-        with _prefs_lock:
-            prefs = _load_prefs()
-            prefs['accent_color'] = hex_color.upper()
             _save_prefs(prefs)
     except Exception:
         pass

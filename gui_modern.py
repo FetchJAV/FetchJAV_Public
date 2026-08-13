@@ -77,7 +77,7 @@ except Exception:
     pass
 
 import requests
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 
 import config
 import M3U8Sites
@@ -97,6 +97,7 @@ from subtitle_engine import (
     normalize_subtitle_mode,
 )
 from translation_settings_ui import (
+    ModalOverlay,
     open_translation_settings_dialog,
     translation_failure_message,
     translation_provider_summary,
@@ -104,8 +105,11 @@ from translation_settings_ui import (
 from video_identity import (
     normalize_source_subtitle_evidence,
     trusted_chinese_subtitle_evidence,
+    video_code,
 )
+from subtitle import SubtitleManager, SubtitleTrack, SubtitleSourceType
 from video_preview import PreviewProxyServer, PreviewSource, resolve_preview_source
+from metadata_fetcher import fetch_video_metadata
 from ui_theme import (
     ACCENT, ACCENT_HOVER, ACCENT_DIM,
     SUCCESS, SUCCESS_DIM, WARNING, WARNING_DIM, ERROR_C, ERROR_DIM,
@@ -161,25 +165,6 @@ def _dim_color(hex_color, bg_hex, alpha=0.12):
     g = int(fg * (1 - alpha) + bg * alpha)
     b = int(fb * (1 - alpha) + bb * alpha)
     return _rgb_to_hex((r, g, b))
-
-
-def apply_accent_color(hex_color):
-    import ui_theme as _ui_theme
-    import gui_modern as _gm
-    light = hex_color
-    dark = _brighten(hex_color, 1.15)
-    _ui_theme.ACCENT = (light, dark)
-    _ui_theme.ACCENT_HOVER = (_brighten(light, 0.92), _brighten(dark, 0.92))
-    _ui_theme.ACCENT_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
-    _ui_theme.TEXT_LINK = (light, dark)
-    _ui_theme.ERROR_C = (light, dark)
-    _ui_theme.ERROR_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
-    _gm.ACCENT = (light, dark)
-    _gm.ACCENT_HOVER = (_brighten(light, 0.92), _brighten(dark, 0.92))
-    _gm.ACCENT_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
-    _gm.TEXT_LINK = (light, dark)
-    _gm.ERROR_C = (light, dark)
-    _gm.ERROR_DIM = (_dim_color(light, '#FFFFFF', 0.12), _dim_color(dark, '#16161B', 0.18))
 
 
 SITES = {
@@ -949,6 +934,36 @@ def _create_height_fitted_hd_ctk_image(
     )
 
 
+def _make_circular_avatar(img: Image.Image, diameter: int) -> ctk.CTkImage:
+    """Centre-crop ``img`` to a square and mask it to a circle."""
+    try:
+        diameter = max(1, int(diameter))
+        if not img:
+            square = Image.new('RGB', (diameter, diameter), (16, 16, 22))
+        else:
+            img = img.convert('RGBA')
+            iw, ih = img.size
+            side = min(iw, ih)
+            if side <= 0:
+                side = diameter
+            left = (iw - side) // 2
+            top = (ih - side) // 2
+            square = img.crop((left, top, left + side, top + side))
+            if square.size != (diameter, diameter):
+                resample_filter = getattr(Image, 'Resampling', Image).LANCZOS
+                square = square.resize((diameter, diameter), resample_filter)
+        mask = Image.new('L', (diameter, diameter), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, diameter, diameter), fill=255)
+        square.putalpha(mask)
+        return ctk.CTkImage(
+            light_image=square,
+            dark_image=square,
+            size=(diameter, diameter)
+        )
+    except Exception:
+        return _create_height_fitted_hd_ctk_image(img, diameter, diameter)
+
+
 def _get_thumb_session() -> requests.Session:
     global _thumb_session
     if _thumb_session is None:
@@ -1056,6 +1071,42 @@ def _fetch_thumbnail(url: str, site_key: str = '') -> Optional[Image.Image]:
                     _thumb_cache.pop(k, None)
         return img
     return None
+
+
+def _fetch_actress_portrait(url: str) -> Optional[Image.Image]:
+    """Download an actress portrait from a Cloudflare-protected CDN (e.g.
+    cdn.javmiku.com) using the browser-impersonating scraper; cached per-URL."""
+    if not url:
+        return None
+    cached = _thumb_cache.get(url)
+    if cached is not None:
+        return cached
+    img = None
+    try:
+        from metadata_fetcher import _make_cloud_scraper
+        with _make_cloud_scraper() as scraper:
+            response = scraper.get(
+                url, timeout=15,
+                headers={
+                    'Referer': 'https://jav.guru/',
+                    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                },
+                **config.proxy_request_kwargs())
+            if response is not None and getattr(response, 'status_code', 0) == 200:
+                img = Image.open(io.BytesIO(response.content)).convert('RGB')
+                img.thumbnail(_THUMB_SIZE, Image.LANCZOS)
+            try:
+                response.close()
+            except Exception:
+                pass
+    except Exception:
+        img = None
+    if img is None:
+        img = _fetch_thumbnail(url, '')
+    if img is not None:
+        with _thumb_cache_lock:
+            _thumb_cache[url] = img
+    return img
 
 
 class SiteSelectorBar(ctk.CTkFrame):
@@ -1650,9 +1701,7 @@ class ModernApp(ctk.CTk):
         return {'system': '◐', 'light': '☀', 'dark': '☾'}.get(self._theme_mode, '◐')
 
     def _get_theme_icon(self):
-        curr_mode = ctk.get_appearance_mode().lower()
-        icon_key = 'sun' if curr_mode == 'light' else 'moon'
-        return getattr(self, '_theme_icons', {}).get(icon_key)
+        return getattr(self, '_theme_icon', None)
 
     def _cycle_theme(self):
         modes = ('system', 'light', 'dark')
@@ -1668,6 +1717,28 @@ class ModernApp(ctk.CTk):
             self._theme_btn.configure(text="", image=icon_obj)
         else:
             self._theme_btn.configure(text=self._theme_glyph())
+
+    def _on_refresh_page(self):
+        active_tab_idx = getattr(self, '_active_tab_idx', 0)
+        tab_keys = getattr(self, '_tab_keys', ['browse'])
+        current_tab = tab_keys[active_tab_idx] if active_tab_idx < len(tab_keys) else 'browse'
+
+        if current_tab == 'browse':
+            if getattr(self, '_browse_mode', 'grid') == 'preview':
+                preview_vid = getattr(self, '_preview_video', None)
+                if preview_vid:
+                    self._open_preview(preview_vid, is_back_nav=True)
+            else:
+                self._load_page()
+        elif current_tab == 'queue':
+            self._render_queue_page()
+        elif current_tab == 'settings':
+            active_cat = getattr(self, '_active_settings_cat', 'update')
+            self._switch_settings_cat(active_cat)
+
+        status_lbl = getattr(self, '_status_lbl', None)
+        if status_lbl:
+            status_lbl.configure(text=T('page_refreshed_toast') if 'page_refreshed_toast' in T.__code__.co_varnames else '🔄 Page refreshed')
 
     def _update_responsive_nav(self, width: int = None):
         if getattr(self, '_is_closing', False):
@@ -2111,19 +2182,28 @@ class ModernApp(ctk.CTk):
         except Exception:
             pass
 
-        # Load theme icons
-        self._theme_icons = {}
+        # Load theme bulb icon (OFF for Dark Mode, ON for Light Mode)
+        self._theme_icon = None
         img_dir_t = os.path.join(os.path.dirname(__file__), 'img')
-        sun_p = os.path.join(img_dir_t, 'icon_sun.png')
-        moon_p = os.path.join(img_dir_t, 'icon_moon.png')
+        bulb_on_p = os.path.join(img_dir_t, 'icon_bulb_on.png')
+        bulb_off_p = os.path.join(img_dir_t, 'icon_bulb_off.png')
         try:
-            if os.path.exists(sun_p) and os.path.exists(moon_p):
-                sun_img = Image.open(sun_p)
-                moon_img = Image.open(moon_p)
-                self._theme_icons = {
-                    'sun': ctk.CTkImage(light_image=sun_img, dark_image=sun_img, size=(20, 20)),
-                    'moon': ctk.CTkImage(light_image=moon_img, dark_image=moon_img, size=(20, 20))
-                }
+            if os.path.exists(bulb_on_p) and os.path.exists(bulb_off_p):
+                b_on_img = Image.open(bulb_on_p)
+                b_off_img = Image.open(bulb_off_p)
+                self._theme_icon = ctk.CTkImage(light_image=b_on_img, dark_image=b_off_img, size=(16, 16))
+        except Exception:
+            pass
+
+        # Load refresh icon (light & dark variants)
+        self._refresh_icon = None
+        ref_light_p = os.path.join(img_dir_t, 'icon_refresh_light.png')
+        ref_dark_p = os.path.join(img_dir_t, 'icon_refresh_dark.png')
+        try:
+            if os.path.exists(ref_light_p) and os.path.exists(ref_dark_p):
+                r_light = Image.open(ref_light_p)
+                r_dark = Image.open(ref_dark_p)
+                self._refresh_icon = ctk.CTkImage(light_image=r_light, dark_image=r_dark, size=(16, 16))
         except Exception:
             pass
 
@@ -2193,9 +2273,20 @@ class ModernApp(ctk.CTk):
             image=icon_obj_theme, width=36, height=36,
             corner_radius=CONTROL_RADIUS, fg_color=BG_CARD, border_width=1,
             border_color=BORDER, hover_color=BG_CARD_HOVER,
-            text_color=TEXT_SEC, font=(ui_font(), 14),
+            text_color=TEXT_SEC, font=(ui_font(), 12),
             command=self._cycle_theme)
         self._theme_btn.pack(side='right', padx=(8, 0), pady=7)
+
+        ref_icon_obj = getattr(self, '_refresh_icon', None)
+        self._refresh_btn = ctk.CTkButton(
+            right_info, text="" if ref_icon_obj else "↻",
+            image=ref_icon_obj,
+            width=36, height=36,
+            corner_radius=CONTROL_RADIUS, fg_color=BG_CARD, border_width=1,
+            border_color=BORDER, hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, font=(ui_font(), 13, 'bold'),
+            command=self._on_refresh_page)
+        self._refresh_btn.pack(side='right', padx=(8, 0), pady=7)
 
         self._lang_var = ctk.StringVar(value=self._lang_name_by_code.get(get_lang(), 'English'))
         self._lang_menu = ctk.CTkOptionMenu(
@@ -2487,6 +2578,7 @@ class ModernApp(ctk.CTk):
                 grid_area.pack_forget()
                 preview_area.pack(fill='both', expand=True)
             else:
+                self._preview_stack = []
                 self._stop_preview_player()
                 preview_area.pack_forget()
                 if sidebar and workspace:
@@ -2499,6 +2591,16 @@ class ModernApp(ctk.CTk):
         self._sync_page_nav_visibility()
 
     def _stop_preview_player(self):
+        fs_win = getattr(self, '_fs_win', None)
+        if fs_win:
+            try:
+                fs_win.destroy()
+            except Exception:
+                pass
+            self._fs_win = None
+            self._fs_canvas = None
+            self._fs_prev_controls = None
+
         timer = getattr(self, '_player_timer_id', None)
         if timer:
             try:
@@ -2532,6 +2634,14 @@ class ModernApp(ctk.CTk):
                 pass
             self._preview_proxy = None
 
+        sub_mgr = getattr(self, '_subtitle_mgr', None)
+        if sub_mgr:
+            try:
+                sub_mgr.set_active_track(None, None)
+            except Exception:
+                pass
+            self._subtitle_mgr = None
+
     @staticmethod
     def _format_duration_ms(ms: int) -> str:
         if not ms or ms < 0:
@@ -2544,6 +2654,34 @@ class ModernApp(ctk.CTk):
             return f'{h}:{m:02d}:{s:02d}'
         return f'{m:02d}:{s:02d}'
 
+    def _create_vlc_player_on_canvas(self, canvas, proxied_url: str):
+        """Create a fresh VLC player bound to `canvas`. Returns the player or None."""
+        try:
+            import vlc
+        except Exception:
+            return None
+        vlc_args = [
+            '--quiet',
+            '--no-xlib',
+            '--avcodec-hw=any',
+            '--network-caching=3000',
+        ]
+        instance = vlc.Instance(*vlc_args)
+        player = instance.media_player_new()
+        player.set_media(instance.media_new(proxied_url))
+
+        canvas.update()
+        if sys.platform == 'win32':
+            player.set_hwnd(canvas.winfo_id())
+        elif sys.platform == 'darwin':
+            player.set_nsobject(canvas.winfo_id())
+        else:
+            player.set_xwindow(canvas.winfo_id())
+
+        self._vlc_instance = instance
+        self._preview_player = player
+        return player
+
     def _init_vlc_player(self, media_url: str, headers: dict, canvas: tk.Canvas):
         try:
             import vlc
@@ -2552,33 +2690,97 @@ class ModernApp(ctk.CTk):
             self._preview_proxy.start()
             token = self._preview_proxy.register(headers)
             proxied = self._preview_proxy.proxied_url(token, media_url)
+            self._preview_proxied_url = proxied
 
-            vlc_args = [
-                '--quiet',
-                '--no-xlib',
-                '--avcodec-hw=any',
-                '--network-caching=3000',
-            ]
-            instance = vlc.Instance(*vlc_args)
-            player = instance.media_player_new()
-            media = instance.media_new(proxied)
-            player.set_media(media)
+            player = self._create_vlc_player_on_canvas(canvas, proxied)
+            if player is None:
+                return False
 
-            canvas.update()
-            if sys.platform == 'win32':
-                player.set_hwnd(canvas.winfo_id())
-            elif sys.platform == 'darwin':
-                player.set_nsobject(canvas.winfo_id())
-            else:
-                player.set_xwindow(canvas.winfo_id())
+            # Initialize Subtitle Subsystem
+            try:
+                self._subtitle_mgr = SubtitleManager()
+                preview_vid = getattr(self, '_preview_video', {}) or {}
+                self._subtitle_mgr.load_tracks_for_video(preview_vid, media_path=media_url)
+            except Exception:
+                pass
 
-            self._vlc_instance = instance
-            self._preview_player = player
             player.play()
             self._start_player_update_loop()
+            self._update_cc_button_state()
+
+            # Apply initial subtitle track after playback starts
+            def _apply_initial_sub():
+                if getattr(self, '_preview_player', None) == player and getattr(self, '_subtitle_mgr', None):
+                    if self._subtitle_mgr.active_track_id:
+                        self._subtitle_mgr.set_active_track(self._subtitle_mgr.active_track_id, player)
+                    self._update_cc_button_state()
+
+            self.after(300, _apply_initial_sub)
             return True
         except Exception as exc:
             return False
+
+    def _rebuild_preview_player(self, canvas, position_ms=None, volume=None, active_track_id=None):
+        """Stop the current VLC player and recreate it on `canvas`, restoring playback state."""
+        old = getattr(self, '_preview_player', None)
+        if old is not None:
+            try:
+                if position_ms is None:
+                    pos = old.get_time()
+                    position_ms = pos if pos >= 0 else None
+                if volume is None:
+                    vol = old.audio_get_volume()
+                    volume = vol if vol >= 0 else None
+                old.stop()
+                old.release()
+            except Exception:
+                pass
+            self._preview_player = None
+
+        proxied = getattr(self, '_preview_proxied_url', None)
+        if not proxied:
+            return False
+        try:
+            player = self._create_vlc_player_on_canvas(canvas, proxied)
+        except Exception:
+            return False
+        if player is None:
+            return False
+
+        if volume is not None and volume >= 0:
+            try:
+                player.audio_set_volume(volume)
+            except Exception:
+                pass
+
+        player.play()
+        self._start_player_update_loop()
+        self._update_cc_button_state()
+
+        def _after_load():
+            if getattr(self, '_preview_player', None) != player:
+                return
+            try:
+                if position_ms and position_ms > 0:
+                    length = player.get_length()
+                    if length > 0:
+                        player.set_time(max(0, min(int(position_ms), length - 1000)))
+                    else:
+                        self.after(300, _after_load)
+                        return
+            except Exception:
+                pass
+            if active_track_id:
+                sub_mgr = getattr(self, '_subtitle_mgr', None)
+                if sub_mgr:
+                    try:
+                        sub_mgr.set_active_track(active_track_id, player)
+                    except Exception:
+                        pass
+                self._update_cc_button_state()
+
+        self.after(400, _after_load)
+        return True
 
     def _start_player_update_loop(self):
         if getattr(self, '_player_timer_id', None):
@@ -2663,6 +2865,12 @@ class ModernApp(ctk.CTk):
             return 'break'
         elif keysym in ('down', 'volumedown'):
             self._on_player_down()
+            return 'break'
+        elif keysym in ('f', 'f11'):
+            self._toggle_fullscreen_player()
+            return 'break'
+        elif keysym == 'escape':
+            self._exit_fullscreen_player()
             return 'break'
 
     def _on_player_space(self, event=None):
@@ -2775,6 +2983,563 @@ class ModernApp(ctk.CTk):
             vol = int(float(value) * 100)
             player.audio_set_volume(vol)
 
+    # ── FULLSCREEN VIDEO PLAYER ──────────────────────────────────────────────
+
+    def _build_player_controls(self, parent, fullscreen=False):
+        controls = ctk.CTkFrame(parent, fg_color='#111115', height=40, corner_radius=0)
+        controls.pack(fill='x', side='bottom')
+
+        self._player_play_btn = ctk.CTkButton(
+            controls, text='▶', width=36, height=28,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=WHITE, font=(ui_font(), 12, 'bold'),
+            command=self._toggle_player_play)
+        self._player_play_btn.pack(side='left', padx=(6, 2), pady=4)
+
+        self._player_time_lbl = ctk.CTkLabel(
+            controls, text='00:00 / 00:00', text_color=TEXT_DIM,
+            font=('Consolas', 11))
+        self._player_time_lbl.pack(side='left', padx=6)
+
+        self._player_slider = ctk.CTkSlider(
+            controls, from_=0.0, to=1.0, height=14,
+            button_color=ACCENT, button_hover_color=ACCENT_HOVER,
+            progress_color=ACCENT, fg_color=BORDER,
+            command=self._on_player_seek)
+        self._player_slider.pack(side='left', fill='x', expand=True, padx=8)
+
+        ctk.CTkLabel(controls, text='🔊', text_color=TEXT_DIM, font=(ui_font(), 11)).pack(side='left', padx=(4, 0))
+        self._player_vol_slider = ctk.CTkSlider(
+            controls, from_=0.0, to=1.0, width=70, height=12,
+            button_color=TEXT_PRI, progress_color=ACCENT, fg_color=BORDER,
+            command=self._on_player_volume)
+        self._player_vol_slider.set(0.8)
+        self._player_vol_slider.pack(side='left', padx=(4, 6))
+
+        # CC / Subtitle button
+        self._player_cc_btn = ctk.CTkButton(
+            controls, text='CC', width=42, height=26,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_DIM, border_width=1, border_color=BORDER,
+            corner_radius=4, font=(ui_font(), 10, 'bold'),
+            command=self._open_subtitle_menu_modal)
+        self._player_cc_btn.pack(side='left', padx=(2, 8), pady=4)
+
+        # Fullscreen toggle button
+        self._player_fs_btn = ctk.CTkButton(
+            controls, text='Exit' if fullscreen else 'Full', width=48, height=26,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, border_width=1, border_color=BORDER,
+            corner_radius=4, font=(ui_font(), 10, 'bold'),
+            command=self._toggle_fullscreen_player)
+        self._player_fs_btn.pack(side='left', padx=(2, 8), pady=4)
+
+        self._sync_player_volume_slider()
+
+    def _sync_player_volume_slider(self):
+        player = getattr(self, '_preview_player', None)
+        slider = getattr(self, '_player_vol_slider', None)
+        if player and slider:
+            try:
+                vol = player.audio_get_volume()
+                if vol >= 0:
+                    slider.set(vol / 100.0)
+            except Exception:
+                pass
+
+    def _toggle_fullscreen_player(self, event=None):
+        win = getattr(self, '_fs_win', None)
+        if win is not None:
+            try:
+                if win.winfo_exists():
+                    self._exit_fullscreen_player()
+                    return
+            except tk.TclError:
+                pass
+            self._fs_win = None
+        self._enter_fullscreen_player()
+
+    def _enter_fullscreen_player(self):
+        player = getattr(self, '_preview_player', None)
+        orig_canvas = getattr(self, '_preview_canvas', None)
+        if player is None or orig_canvas is None:
+            return
+        try:
+            if not orig_canvas.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        win = None
+        try:
+            win = ctk.CTkToplevel(self)
+            win.title('')
+            win.configure(fg_color='#000000')
+            win.attributes('-fullscreen', True)
+            win.bind('<Escape>', self._exit_fullscreen_player, add='+')
+            win.bind('<Double-Button-1>', self._toggle_fullscreen_player, add='+')
+            win.protocol('WM_DELETE_WINDOW', self._exit_fullscreen_player)
+
+            canvas = tk.Canvas(win, bg='#000000', highlightthickness=0)
+            canvas.pack(fill='both', expand=True)
+
+            self._fs_win = win
+            self._fs_canvas = canvas
+            self._fs_prev_controls = {
+                'play': getattr(self, '_player_play_btn', None),
+                'time': getattr(self, '_player_time_lbl', None),
+                'slider': getattr(self, '_player_slider', None),
+                'vol': getattr(self, '_player_vol_slider', None),
+                'cc': getattr(self, '_player_cc_btn', None),
+                'fs': getattr(self, '_player_fs_btn', None),
+            }
+            self._build_player_controls(win, fullscreen=True)
+
+            # Realize the fullscreen window so canvas.winfo_id() is a valid hwnd
+            win.update_idletasks()
+            win.update()
+
+            sub_mgr = getattr(self, '_subtitle_mgr', None)
+            active_track_id = sub_mgr.active_track_id if sub_mgr else None
+
+            # Recreate the player on the fullscreen canvas. A fresh player bound
+            # to the new hwnd reliably moves the video output, unlike set_hwnd
+            # on an already-running player.
+            ok = self._rebuild_preview_player(canvas, active_track_id=active_track_id)
+            if not ok:
+                try:
+                    win.destroy()
+                except Exception:
+                    pass
+                self._fs_win = None
+                self._fs_canvas = None
+                self._fs_prev_controls = None
+                try:
+                    orig_canvas.update()
+                    self._rebuild_preview_player(orig_canvas, active_track_id=active_track_id)
+                except Exception:
+                    pass
+                return
+
+            self._bind_player_keyboard_controls(win)
+            self._bind_player_keyboard_controls(canvas)
+            self._update_cc_button_state()
+            try:
+                canvas.focus_set()
+                win.focus_force()
+            except Exception:
+                pass
+        except Exception:
+            try:
+                if win is not None:
+                    win.destroy()
+            except Exception:
+                pass
+            self._fs_win = None
+            self._fs_canvas = None
+            self._fs_prev_controls = None
+
+    def _exit_fullscreen_player(self, event=None):
+        win = getattr(self, '_fs_win', None)
+        if win is None:
+            return
+        try:
+            if win.winfo_exists():
+                saved = getattr(self, '_fs_prev_controls', None) or {}
+                if saved.get('play'):
+                    self._player_play_btn = saved['play']
+                if saved.get('time'):
+                    self._player_time_lbl = saved['time']
+                if saved.get('slider'):
+                    self._player_slider = saved['slider']
+                if saved.get('vol'):
+                    self._player_vol_slider = saved['vol']
+                if saved.get('cc'):
+                    self._player_cc_btn = saved['cc']
+                if saved.get('fs'):
+                    self._player_fs_btn = saved['fs']
+                win.destroy()
+        except tk.TclError:
+            pass
+        except Exception:
+            pass
+        self._fs_win = None
+        self._fs_canvas = None
+        self._fs_prev_controls = None
+
+        # Recreate the player on the original embedded canvas
+        orig_canvas = getattr(self, '_preview_canvas', None)
+        if orig_canvas is not None:
+            try:
+                if orig_canvas.winfo_exists():
+                    orig_canvas.update()
+                    sub_mgr = getattr(self, '_subtitle_mgr', None)
+                    active_track_id = sub_mgr.active_track_id if sub_mgr else None
+                    self._rebuild_preview_player(orig_canvas, active_track_id=active_track_id)
+            except tk.TclError:
+                pass
+            except Exception:
+                pass
+        self._update_cc_button_state()
+        try:
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+
+    # ── SUBTITLE SYSTEM INTEGRATION ──────────────────────────────────────────
+
+    def _update_cc_button_state(self):
+        btn = getattr(self, '_player_cc_btn', None)
+        if not btn:
+            return
+        sub_mgr = getattr(self, '_subtitle_mgr', None)
+        active_track = sub_mgr.get_active_track() if sub_mgr else None
+        if active_track:
+            lang_tag = active_track.language_code.upper() if active_track.language_code != 'user' else 'FILE'
+            btn.configure(
+                text=f"CC ({lang_tag})",
+                text_color=ACCENT,
+                border_color=ACCENT,
+                fg_color=BG_CARD_HOVER
+            )
+        else:
+            btn.configure(
+                text="CC",
+                text_color=TEXT_DIM,
+                border_color=BORDER,
+                fg_color='transparent'
+            )
+
+    def _open_subtitle_menu_modal(self):
+        sub_mgr = getattr(self, '_subtitle_mgr', None)
+        if not sub_mgr:
+            status_lbl = getattr(self, '_status_lbl', None)
+            if status_lbl:
+                status_lbl.configure(text=T('subtitle_error_unavailable'))
+            return
+
+        modal = ctk.CTkToplevel(self)
+        modal.title(T('subtitle_title'))
+        modal.geometry("460x520")
+        modal.resizable(False, False)
+        modal.transient(self)
+        modal.grab_set()
+        modal.configure(fg_color=BG_DARK)
+
+        main_body = ctk.CTkFrame(modal, fg_color=BG_DARK, corner_radius=0)
+        main_body.pack(fill='both', expand=True, padx=16, pady=16)
+
+        # Available tracks scroll frame
+        tracks_scroll = ctk.CTkScrollableFrame(
+            main_body, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD,
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=BORDER_HOVER
+        )
+        tracks_scroll.pack(fill='both', expand=True, pady=(0, 12))
+
+        def _refresh_track_list():
+            for child in tracks_scroll.winfo_children():
+                child.destroy()
+
+            current_tracks = sub_mgr.get_tracks()
+            active_id = sub_mgr.active_track_id
+
+            # Off option
+            is_off = (active_id is None)
+            off_frame = ctk.CTkFrame(
+                tracks_scroll, fg_color=BG_CARD_HOVER if is_off else 'transparent',
+                corner_radius=4, height=36
+            )
+            off_frame.pack(fill='x', pady=2, padx=4)
+            off_frame.pack_propagate(False)
+
+            def _select_off():
+                sub_mgr.set_active_track(None, getattr(self, '_preview_player', None))
+                self._update_cc_button_state()
+                _refresh_track_list()
+
+            off_btn = ctk.CTkRadioButton(
+                off_frame, text=T('subtitle_off'),
+                text_color=TEXT_PRI if is_off else TEXT_DIM,
+                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                font=(ui_font(), 11, 'bold' if is_off else 'normal'),
+                command=_select_off
+            )
+            if is_off:
+                off_btn.select()
+            else:
+                off_btn.deselect()
+            off_btn.pack(side='left', padx=10, pady=6)
+
+            if current_tracks:
+                ctk.CTkLabel(
+                    tracks_scroll, text='────── Available Subtitles ──────',
+                    text_color=TEXT_DIM, font=(ui_font(), 9)
+                ).pack(fill='x', pady=6)
+
+            for track in current_tracks:
+                is_active = (track.id == active_id)
+                t_frame = ctk.CTkFrame(
+                    tracks_scroll, fg_color=BG_CARD_HOVER if is_active else 'transparent',
+                    corner_radius=4, height=40
+                )
+                t_frame.pack(fill='x', pady=2, padx=4)
+                t_frame.pack_propagate(False)
+
+                def _make_select_cmd(tid=track.id):
+                    def _cmd():
+                        sub_mgr.set_active_track(tid, getattr(self, '_preview_player', None))
+                        self._update_cc_button_state()
+                        _refresh_track_list()
+                    return _cmd
+
+                r_btn = ctk.CTkRadioButton(
+                    t_frame, text=track.name,
+                    text_color=WHITE if is_active else TEXT_PRI,
+                    fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                    font=(ui_font(), 11, 'bold' if is_active else 'normal'),
+                    command=_make_select_cmd()
+                )
+                if is_active:
+                    r_btn.select()
+                else:
+                    r_btn.deselect()
+                r_btn.pack(side='left', padx=10, pady=8)
+
+                # Source badge
+                badge_text = track.source.value.upper() if hasattr(track.source, 'value') else str(track.source).upper()
+                ctk.CTkLabel(
+                    t_frame, text=badge_text,
+                    text_color=ACCENT if is_active else TEXT_DIM,
+                    fg_color=BG_DARK, corner_radius=3, height=18, padx=6,
+                    font=(ui_font(), 9)
+                ).pack(side='right', padx=10)
+
+        _refresh_track_list()
+
+        # Action Buttons Row
+        actions_box = ctk.CTkFrame(main_body, fg_color='transparent')
+        actions_box.pack(fill='x', side='bottom')
+
+        def _on_load_local_file():
+            file_path = filedialog.askopenfilename(
+                title=T('subtitle_load_file'),
+                filetypes=[
+                    ("Subtitle Files", "*.srt *.vtt *.ass *.ssa"),
+                    ("SubRip (*.srt)", "*.srt"),
+                    ("WebVTT (*.vtt)", "*.vtt"),
+                    ("Advanced SubStation Alpha (*.ass *.ssa)", "*.ass *.ssa"),
+                    ("All Files", "*.*")
+                ]
+            )
+            if file_path:
+                try:
+                    track = sub_mgr.add_local_track(file_path)
+                    sub_mgr.set_active_track(track.id, getattr(self, '_preview_player', None))
+                    self._update_cc_button_state()
+                    _refresh_track_list()
+                except Exception as exc:
+                    messagebox.showerror("Subtitle Error", f"{T('subtitle_error_load')}\n{exc}")
+
+        ctk.CTkButton(
+            actions_box, text=T('subtitle_load_file'), height=36,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
+            corner_radius=CONTROL_RADIUS, font=(ui_font(), 11, 'bold'),
+            command=_on_load_local_file
+        ).pack(fill='x', pady=(0, 6))
+
+        def _on_open_search_online():
+            modal.destroy()
+            self._open_online_subtitle_search_modal()
+
+        ctk.CTkButton(
+            actions_box, text=T('subtitle_search_online'), height=36,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+            text_color=WHITE, corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 11, 'bold'),
+            command=_on_open_search_online
+        ).pack(fill='x')
+
+    def _open_online_subtitle_search_modal(self):
+        sub_mgr = getattr(self, '_subtitle_mgr', None)
+        if not sub_mgr:
+            return
+
+        modal = ctk.CTkToplevel(self)
+        modal.title(T('subtitle_online_title'))
+        modal.geometry("560x540")
+        modal.resizable(False, False)
+        modal.transient(self)
+        modal.grab_set()
+        modal.configure(fg_color=BG_DARK)
+
+        main_body = ctk.CTkFrame(modal, fg_color=BG_DARK, corner_radius=0)
+        main_body.pack(fill='both', expand=True, padx=16, pady=16)
+
+        # Search Query Bar
+        query_frame = ctk.CTkFrame(main_body, fg_color='transparent')
+        query_frame.pack(fill='x', pady=(0, 10))
+
+        default_query = video_code(self._preview_video) if getattr(self, '_preview_video', None) else ""
+        if not default_query and getattr(self, '_preview_video', None):
+            default_query = str(self._preview_video.get('title') or '')[:30]
+
+        query_entry = ctk.CTkEntry(
+            query_frame, placeholder_text=T('subtitle_search_placeholder'),
+            fg_color=BG_CARD, text_color=TEXT_PRI, border_color=BORDER,
+            corner_radius=CONTROL_RADIUS, font=(ui_font(), 11)
+        )
+        query_entry.pack(side='left', fill='x', expand=True, padx=(0, 6))
+        if default_query:
+            query_entry.insert(0, default_query)
+
+        lang_options = [
+            T('subtitle_all_langs'), 'English', 'Japanese', 'Traditional Chinese', 'Simplified Chinese',
+            'Korean', 'Spanish', 'French', 'German', 'Vietnamese', 'Thai', 'Indonesian'
+        ]
+        lang_var = ctk.StringVar(value=T('subtitle_all_langs'))
+
+        lang_menu = ctk.CTkOptionMenu(
+            query_frame, variable=lang_var, values=lang_options,
+            width=120, height=32, fg_color=BG_CARD, button_color=BORDER,
+            button_hover_color=BORDER_HOVER, text_color=TEXT_PRI,
+            dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
+            font=(ui_font(), 10)
+        )
+        lang_menu.pack(side='left', padx=(0, 6))
+
+        prov_options = [T('subtitle_all_providers'), 'SubtitleCat', 'YTS Subtitles', 'OpenSubtitles', 'SubDL', 'Podnapisi']
+        prov_var = ctk.StringVar(value=T('subtitle_all_providers'))
+
+        prov_menu = ctk.CTkOptionMenu(
+            query_frame, variable=prov_var, values=prov_options,
+            width=130, height=32, fg_color=BG_CARD, button_color=BORDER,
+            button_hover_color=BORDER_HOVER, text_color=TEXT_PRI,
+            dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
+            font=(ui_font(), 10)
+        )
+        prov_menu.pack(side='left', padx=(0, 6))
+
+        # Status Label
+        status_lbl = ctk.CTkLabel(
+            main_body, text="", text_color=TEXT_DIM,
+            font=(ui_font(), 10)
+        )
+        status_lbl.pack(anchor='w', pady=(0, 6))
+
+        # Results scroll container
+        results_scroll = ctk.CTkScrollableFrame(
+            main_body, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD,
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=BORDER_HOVER
+        )
+        results_scroll.pack(fill='both', expand=True)
+
+        def _do_search():
+            q = query_entry.get().strip()
+            if not q:
+                return
+
+            status_lbl.configure(text=T('subtitle_searching'), text_color=ACCENT)
+            for child in results_scroll.winfo_children():
+                child.destroy()
+
+            selected_lang = lang_var.get()
+            lang_filter = None if selected_lang == T('subtitle_all_langs') else selected_lang
+
+            selected_prov = prov_var.get()
+            prov_filter = None if selected_prov in (T('subtitle_all_providers'), 'All Providers') else selected_prov
+
+            def _on_search_done(results, error_msg):
+                def _ui_update():
+                    if getattr(self, '_is_closing', False):
+                        return
+                    if error_msg:
+                        status_lbl.configure(text=error_msg, text_color=ERROR_C)
+                        return
+
+                    status_lbl.configure(
+                        text=f"Found {len(results)} subtitle(s)",
+                        text_color=TEXT_DIM if results else ERROR_C
+                    )
+
+                    for child in results_scroll.winfo_children():
+                        child.destroy()
+
+                    if not results:
+                        ctk.CTkLabel(
+                            results_scroll, text=T('subtitle_no_results'),
+                            text_color=TEXT_DIM, font=(ui_font(), 12)
+                        ).pack(expand=True, pady=40)
+                        return
+
+                    for res in results:
+                        card = ctk.CTkFrame(
+                            results_scroll, fg_color=BG_DARK,
+                            corner_radius=4, border_width=1, border_color=BORDER
+                        )
+                        card.pack(fill='x', pady=4, padx=4)
+
+                        info_box = ctk.CTkFrame(card, fg_color='transparent')
+                        info_box.pack(side='left', fill='both', expand=True, padx=10, pady=8)
+
+                        ctk.CTkLabel(
+                            info_box, text=res.title, text_color=TEXT_PRI,
+                            font=(ui_font(), 11, 'bold'), anchor='w', justify='left'
+                        ).pack(anchor='w')
+
+                        meta_sub = ctk.CTkLabel(
+                            info_box, text=f"Language: {res.language} • Provider: {res.provider}",
+                            text_color=TEXT_DIM, font=(ui_font(), 9), anchor='w'
+                        )
+                        meta_sub.pack(anchor='w', pady=(2, 0))
+
+                        def _make_download_cmd(target_res=res):
+                            def _dl():
+                                status_lbl.configure(text=T('subtitle_downloading'), text_color=ACCENT)
+                                def _on_dl_done(track, dl_err):
+                                    def _dl_ui():
+                                        if dl_err or not track:
+                                            status_lbl.configure(text=str(dl_err or T('subtitle_error_load')), text_color=ERROR_C)
+                                        else:
+                                            sub_mgr.set_active_track(track.id, getattr(self, '_preview_player', None))
+                                            self._update_cc_button_state()
+                                            modal.destroy()
+                                    try:
+                                        self.after(0, _dl_ui)
+                                    except Exception:
+                                        pass
+                                sub_mgr.download_online_track_async(target_res, on_complete=_on_dl_done)
+                            return _dl
+
+                        ctk.CTkButton(
+                            card, text='Download & Use', width=110, height=28,
+                            fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                            text_color=WHITE, corner_radius=4,
+                            font=(ui_font(), 10, 'bold'),
+                            command=_make_download_cmd()
+                        ).pack(side='right', padx=10, pady=8)
+
+                try:
+                    self.after(0, _ui_update)
+                except Exception:
+                    pass
+
+            sub_mgr.search_online_async(q, language=lang_filter, provider_name=prov_filter, on_complete=_on_search_done)
+
+        search_btn = ctk.CTkButton(
+            query_frame, text=T('subtitle_search_btn'), width=75, height=32,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=WHITE,
+            corner_radius=CONTROL_RADIUS, font=(ui_font(), 11, 'bold'),
+            command=_do_search
+        )
+        search_btn.pack(side='left')
+
+        # Trigger search immediately on opening modal
+        _do_search()
+
     def _find_video_by_url(self, url: str) -> dict:
         for video in getattr(self, '_videos', []):
             if video.get('url') == url:
@@ -2784,10 +3549,18 @@ class ModernApp(ctk.CTk):
     def _open_preview_for_url(self, url: str):
         self._open_preview(self._find_video_by_url(url))
 
-    def _open_preview(self, video: dict):
+    def _open_preview(self, video: dict, is_back_nav: bool = False):
         url = str((video or {}).get('url') or '').strip()
         if not url:
             return
+
+        if not hasattr(self, '_preview_stack'):
+            self._preview_stack = []
+
+        if not is_back_nav:
+            if not self._preview_stack or (self._preview_stack[-1].get('url') != video.get('url')):
+                self._preview_stack.append(dict(video or {}))
+
         if not hasattr(self, '_preview_gen'):
             self._preview_gen = 0
         self._preview_gen += 1
@@ -2807,83 +3580,427 @@ class ModernApp(ctk.CTk):
 
         threading.Thread(target=_resolve, daemon=True).start()
 
+    def _preview_navigate_back(self):
+        stack = getattr(self, '_preview_stack', [])
+        if len(stack) > 1:
+            stack.pop()
+            prev_video = stack[-1]
+            self._open_preview(prev_video, is_back_nav=True)
+        else:
+            self._preview_stack = []
+            self._set_browse_mode('grid')
+
     def _enrich_preview_metadata(self, video: dict, source: PreviewSource, gen: int):
-        """Cross-search MissAV and SupJav if actor, actress, director, studio, or tags are missing."""
-        title_or_url = f"{video.get('title', '')} {video.get('url', '')} {source.page_url}"
-        m = re.search(r'([a-zA-Z]{2,6}-\d{3,5})', title_or_url, re.IGNORECASE)
-        code = m.group(1).upper() if m else ''
-
-        missing_actor = not (video.get('actor') or video.get('actress') or video.get('models'))
-        missing_director = not (video.get('director'))
-        missing_studio = not (video.get('studio') or video.get('maker'))
-        missing_tags = not (video.get('tags') or video.get('categories'))
-
-        if not (missing_actor or missing_director or missing_studio or missing_tags):
-            return
-
+        """Scrape accurate metadata for the preview info pane: the video's own detail
+        page (JableTV / MissAV / SupJav) plus cross-site lookup for missing fields and
+        an actress photo. Then refresh the info card in place on the main thread."""
         try:
-            from M3U8Sites.SiteMissAV import MissAVBrowser
-            from M3U8Sites.SiteSupJav import SupJavBrowser
+            enriched = fetch_video_metadata(video)
         except Exception:
-            return
+            enriched = {}
 
-        search_query = code or video.get('title', '')[:25]
-        if not search_query:
-            return
-
-        enriched = {}
-
-        # 1. Search MissAV
-        try:
-            mav_vids = MissAVBrowser.search(search_query)
-            if mav_vids and isinstance(mav_vids, list):
-                mv = mav_vids[0]
-                if mv.get('actor') or mv.get('models') or mv.get('actress'):
-                    enriched['actor'] = mv.get('actor') or mv.get('models') or mv.get('actress')
-                    enriched['actress'] = mv.get('actress') or mv.get('actor')
-                if mv.get('studio') or mv.get('maker'):
-                    enriched['studio'] = mv.get('studio') or mv.get('maker')
-                if mv.get('director'):
-                    enriched['director'] = mv.get('director')
-                if mv.get('tags') or mv.get('categories'):
-                    enriched['tags'] = mv.get('tags') or mv.get('categories')
-        except Exception:
-            pass
-
-        # 2. Search SupJav if still missing metadata
-        if not (enriched.get('actor') and enriched.get('studio') and enriched.get('director') and enriched.get('tags')):
-            try:
-                sup_vids = SupJavBrowser.search(search_query)
-                if sup_vids and isinstance(sup_vids, list):
-                    sv = sup_vids[0]
-                    if not enriched.get('actor') and (sv.get('actor') or sv.get('actress') or sv.get('models')):
-                        enriched['actor'] = sv.get('actor') or sv.get('actress') or sv.get('models')
-                        enriched['actress'] = sv.get('actress') or sv.get('actor')
-                    if not enriched.get('studio') and (sv.get('studio') or sv.get('maker')):
-                        enriched['studio'] = sv.get('studio') or sv.get('maker')
-                    if not enriched.get('director') and sv.get('director'):
-                        enriched['director'] = sv.get('director')
-                    if not enriched.get('tags') and (sv.get('tags') or sv.get('categories')):
-                        enriched['tags'] = sv.get('tags') or sv.get('categories')
-            except Exception:
-                pass
-
-        if enriched:
+        if isinstance(enriched, dict) and enriched:
             for k, v in enriched.items():
                 if v and not self._preview_video.get(k):
                     self._preview_video[k] = v
+            if gen == getattr(self, '_preview_gen', 0):
+                try:
+                    self.after(0, self._refresh_preview_info)
+                except Exception:
+                    pass
 
-            def _update():
-                if not getattr(self, '_is_closing', False) and gen == getattr(self, '_preview_gen', 0):
-                    self._render_preview_detail(source)
-
+        # Related-video cross-search (MissAV / SupJav) to feed the recommendation rows
+        title_or_url = f"{video.get('title', '')} {video.get('url', '')} {source.page_url}"
+        m = re.search(r'([a-zA-Z]{2,6}-\d{3,5})', title_or_url, re.IGNORECASE)
+        code = m.group(1).upper() if m else ''
+        if code:
+            related = []
+            seen = set()
             try:
-                self.after(0, _update)
+                from M3U8Sites.SiteMissAV import MissAVBrowser
+                for rv in MissAVBrowser.search(code) or []:
+                    if not isinstance(rv, dict):
+                        continue
+                    u = rv.get('url', '')
+                    if u and u not in seen:
+                        seen.add(u)
+                        related.append(rv)
+            except Exception:
+                pass
+            try:
+                from M3U8Sites.SiteSupJav import SupJavBrowser
+                for rv in SupJavBrowser.search(code) or []:
+                    if not isinstance(rv, dict):
+                        continue
+                    u = rv.get('url', '')
+                    if u and u not in seen:
+                        seen.add(u)
+                        related.append(rv)
+            except Exception:
+                pass
+            if related:
+                self._preview_video['related_vids'] = related
+
+    def _preview_info_payload(self) -> dict:
+        """Current values for the preview info card (shared by render + refresh)."""
+        v_dict = getattr(self, '_preview_video', {}) or {}
+        source = getattr(self, '_preview_source', None)
+        page_url = getattr(source, 'page_url', '') if source is not None else ''
+        url = str(v_dict.get('url') or page_url or '')
+
+        def _join(*keys):
+            vals = []
+            for k in keys:
+                raw = v_dict.get(k)
+                if isinstance(raw, (list, tuple, set)):
+                    for x in raw:
+                        s = str(x).strip()
+                        if s and s not in vals:
+                            vals.append(s)
+                else:
+                    s = str(raw or '').strip()
+                    if s and s not in vals:
+                        vals.append(s)
+            return ', '.join(vals) or 'N/A'
+
+        actor_val = _join('actor', 'stars', 'star')
+        actress_val = _join('actress', 'actresses', 'model', 'models', 'cast')
+        director_val = _join('director', 'directors')
+        studio_val = _join('studio', 'maker', 'publisher', 'production')
+        if studio_val == 'N/A':
+            studio_val = str(getattr(source, 'site_name', '') if source is not None else '') or 'N/A'
+
+        tags_val = _join('tags', 'categories', 'keywords')
+
+        duration_val = 'N/A'
+        if source is not None and getattr(source, 'duration', ''):
+            duration_val = str(source.duration)
+        elif v_dict.get('duration'):
+            duration_val = str(v_dict.get('duration'))
+        fmt_val = str((getattr(source, 'media_kind', '') if source is not None else '') or v_dict.get('media_kind') or 'HLS').upper()
+        stream_val = str(getattr(source, 'media_url', '') if source is not None else '') or 'N/A'
+
+        return {
+            'actor': actor_val,
+            'actress': actress_val,
+            'director': director_val,
+            'studio': studio_val,
+            'tags': tags_val,
+            'duration': duration_val,
+            'format': fmt_val,
+            'url': url,
+            'stream': stream_val,
+        }
+
+    def _refresh_preview_info(self):
+        """Update the info card value labels and actress photo after enrichment."""
+        if getattr(self, '_is_closing', False):
+            return
+        if getattr(self, '_browse_mode', '') != 'preview':
+            return
+        labels = getattr(self, '_preview_info_labels', None)
+        if not labels:
+            return
+        payload = self._preview_info_payload()
+        for key in ('actor', 'actress', 'director', 'studio', 'tags', 'duration', 'format', 'url', 'stream'):
+            lbl = labels.get(key)
+            if lbl is None:
+                continue
+            try:
+                if not lbl.winfo_exists():
+                    continue
+                lbl.configure(text=payload[key])
+            except tk.TclError:
+                return
+
+        photo_urls = (self._preview_video or {}).get('actress_photos') or []
+        if not photo_urls:
+            single = (self._preview_video or {}).get('actress_photo') or ''
+            if single:
+                photo_urls = [single]
+        if photo_urls:
+            self._load_actress_photos(photo_urls)
+
+        # Now that the current video's tags are known, re-rank the category row.
+        self._refresh_category_cards()
+
+    def _load_actress_photos(self, photo_urls):
+        """Fetch actress portraits in the background and show them as circular
+        avatars in an inline, horizontally scrollable row in the info card."""
+        if getattr(self, '_is_closing', False):
+            return
+        urls = []
+        for u in (photo_urls or []):
+            s = str(u or '').strip()
+            if s and s not in urls:
+                urls.append(s)
+        if not urls:
+            return
+        gen = getattr(self, '_preview_gen', 0)
+        scroll = getattr(self, '_preview_photos_scroll', None)
+        if scroll is None or not scroll.winfo_exists():
+            return
+        already = set(getattr(scroll, '_added_urls', []))
+        urls = [u for u in urls if u not in already]
+        if not urls:
+            return
+        names = [str(x).strip() for x in
+                 ((self._preview_video or {}).get('actress') or []) if str(x).strip()]
+
+        def _worker():
+            if self._is_closing or gen != getattr(self, '_preview_gen', 0):
+                return
+            results = []
+            for u in urls:
+                if self._is_closing or gen != getattr(self, '_preview_gen', 0):
+                    return
+                img = _fetch_actress_portrait(u)
+                if img is not None:
+                    results.append(u)
+            if not results:
+                return
+
+            def _apply():
+                if self._is_closing or gen != getattr(self, '_preview_gen', 0):
+                    return
+                scroll = getattr(self, '_preview_photos_scroll', None)
+                if scroll is None or not scroll.winfo_exists():
+                    return
+                try:
+                    if not getattr(self, '_preview_photos_shown', False):
+                        try:
+                            scroll.grid(row=1, column=0, sticky='ew', pady=(12, 0))
+                        except tk.TclError:
+                            return
+                        self._preview_photos_shown = True
+                    diameter = 88
+                    for u in results:
+                        if not scroll.winfo_exists():
+                            return
+                        img = _fetch_actress_portrait(u)
+                        if img is None:
+                            continue
+                        ctk_img = _make_circular_avatar(img, diameter)
+                        holder = ctk.CTkFrame(scroll, fg_color='transparent')
+                        holder.pack(side='left', padx=(0, 10), pady=6)
+                        lbl = ctk.CTkLabel(holder, text='', width=diameter, height=diameter)
+                        lbl.pack()
+                        lbl.configure(image=ctk_img)
+                        lbl._ctk_img_ref = ctk_img
+                        added = getattr(scroll, '_added_urls', None)
+                        if added is None:
+                            added = []
+                            scroll._added_urls = added
+                        added.append(u)
+                        if names:
+                            ctk.CTkLabel(
+                                holder, text=names[0], text_color=TEXT_DIM,
+                                font=(ui_font(), 9), wraplength=diameter, justify='center'
+                            ).pack(anchor='center', pady=(4, 0))
+                            names.pop(0)
+                except Exception:
+                    pass
+
+            self._ui(_apply)
+
+        try:
+            self._thumb_executor.submit(_worker)
+        except RuntimeError:
+            pass
+
+    def _video_tag_set(self, v) -> set:
+        """Normalized lowercase tag set for a video dict (any of the tag keys)."""
+        out = set()
+        if not isinstance(v, dict):
+            return out
+        for k in ('tags', 'categories', 'keywords'):
+            raw = v.get(k)
+            if isinstance(raw, (list, tuple, set)):
+                for x in raw:
+                    s = str(x).strip().lower()
+                    if s:
+                        out.add(s)
+            elif raw:
+                for part in str(raw).split(','):
+                    s = part.strip().lower()
+                    if s:
+                        out.add(s)
+        return out
+
+    def _rank_category_pool(self, pool):
+        """Sort candidate videos by how many tags they share with the current
+        video, tie-broken by the original rotation order."""
+        cur_tags = self._video_tag_set(getattr(self, '_preview_video', {}))
+
+        def _score(c):
+            return (-len((c.get('_tag_set') or set()) & cur_tags), c.get('_tag_order', 0))
+
+        return sorted(pool, key=_score)
+
+    def _render_more_category_cards(self, cat_grid, display_vids, gen):
+        """Render (or re-render) the 3 'More from this category' cards."""
+        if self._is_closing or gen != getattr(self, '_preview_gen', 0):
+            return
+        if cat_grid is None or not cat_grid.winfo_exists():
+            return
+        try:
+            for child in cat_grid.winfo_children():
+                try:
+                    child.destroy()
+                except tk.TclError:
+                    pass
+            for c in range(3):
+                cat_grid.grid_columnconfigure(c, weight=1, uniform='cat_cols')
+        except tk.TclError:
+            return
+
+        for v_idx, v_item in enumerate(display_vids[:3]):
+            v_url = v_item.get('url', '')
+            v_title = v_item.get('title', '')
+            v_dur = v_item.get('duration', '')
+            v_thumb = v_item.get('thumbnail', '')
+
+            v_card = ctk.CTkFrame(
+                cat_grid, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+                border_width=1, border_color=BORDER_CARD)
+            v_card.grid(row=0, column=v_idx, padx=4, sticky='nsew')
+
+            v_thumb_holder = ctk.CTkFrame(v_card, fg_color=BG_SIDEBAR, height=180, corner_radius=6)
+            v_thumb_holder.pack(fill='x', padx=4, pady=(4, 0))
+            v_thumb_holder.pack_propagate(False)
+
+            v_lbl = ctk.CTkLabel(v_thumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
+            v_lbl.pack(fill='both', expand=True)
+            if v_thumb:
+                self._load_thumb_async(v_thumb, v_lbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
+
+            if v_dur:
+                ctk.CTkLabel(
+                    v_thumb_holder, text=f' {v_dur} ', text_color=WHITE, fg_color='#000000',
+                    corner_radius=3, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
+
+            v_info = ctk.CTkFrame(v_card, fg_color='transparent')
+            v_info.pack(fill='x', padx=8, pady=(6, 8))
+
+            ctk.CTkLabel(
+                v_info, text=v_title, text_color=TEXT_PRI,
+                font=(ui_font(), 10, 'bold'), wraplength=220, justify='left', anchor='w').pack(anchor='w', fill='x', pady=(0, 4))
+
+            v_badges = ctk.CTkFrame(v_info, fg_color='transparent')
+            v_badges.pack(anchor='w', fill='x')
+
+            ctk.CTkLabel(
+                v_badges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
+                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
+                font=(ui_font(), 9, 'bold')).pack(side='left')
+
+            v_is_saved = config.is_video_saved(v_url)
+            v_heart_img = getattr(self, '_heart_active_icon', None) if v_is_saved else getattr(self, '_heart_icon', None)
+            v_heart_text = '' if v_heart_img else ('♥' if v_is_saved else '♡')
+
+            v_heart_btn = ctk.CTkButton(
+                v_badges, text=v_heart_text, image=v_heart_img,
+                width=24, height=22, corner_radius=4,
+                fg_color='transparent',
+                border_width=1, border_color=ACCENT if v_is_saved else BORDER_HOVER,
+                hover_color=BG_CARD_HOVER, text_color=ACCENT if v_is_saved else TEXT_PRI,
+            )
+            v_heart_btn.configure(
+                command=lambda item=v_item, u=v_url, b=v_heart_btn: self._on_card_heart_click(item, u, b)
+            )
+            v_heart_btn.pack(side='right')
+
+            def _bind_v(widget, item=v_item):
+                widget.bind('<Button-1>', lambda e: self._open_preview(item))
+                widget.configure(cursor='hand2')
+
+            _bind_v(v_card)
+            _bind_v(v_thumb_holder)
+            _bind_v(v_lbl)
+            _bind_v(v_info)
+
+    def _enrich_category_tags(self, cat_grid, gen):
+        """Fetch tags for a bounded set of category candidates in the background,
+        then re-rank the row once tag data arrives."""
+        pool = getattr(self, '_preview_category_pool', None)
+        if not pool or getattr(self, '_preview_category_enriching', False):
+            return
+        self._preview_category_enriching = True
+        to_fetch = []
+        for v in pool:
+            if v.get('_tag_set'):
+                continue
+            code = video_code(v)
+            if not code:
+                continue
+            to_fetch.append((v, code))
+        if not to_fetch:
+            return
+        to_fetch = to_fetch[:8]
+
+        def _fetch_one(item):
+            v, code = item
+            try:
+                from metadata_fetcher import fetch_tags_for_code
+                return v, fetch_tags_for_code(code)
+            except Exception:
+                return v, []
+
+        def _worker():
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            results = {}
+            try:
+                with ThreadPoolExecutor(max_workers=4) as ex:
+                    futs = [ex.submit(_fetch_one, it) for it in to_fetch]
+                    try:
+                        for f in as_completed(futs, timeout=15):
+                            v, tags = f.result()
+                            results[id(v)] = tags
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
+            def _apply():
+                if self._is_closing or gen != getattr(self, '_preview_gen', 0):
+                    return
+                for v, _code in to_fetch:
+                    tags = results.get(id(v)) or []
+                    v['tags'] = list(tags)
+                    v['_tag_set'] = {str(t).strip().lower() for t in tags if str(t).strip()}
+                try:
+                    self._refresh_category_cards(cat_grid)
+                except Exception:
+                    pass
+            try:
+                self._ui(_apply)
+            except Exception:
+                pass
+
+        try:
+            threading.Thread(target=_worker, daemon=True).start()
+        except Exception:
+            self._preview_category_enriching = False
+
+    def _refresh_category_cards(self, cat_grid=None):
+        """Re-rank the category pool with the latest tag data and re-render it."""
+        if self._is_closing or getattr(self, '_browse_mode', '') != 'preview':
+            return
+        gen = getattr(self, '_preview_gen', 0)
+        if getattr(self, '_preview_category_gen', -1) != gen:
+            return
+        cat_grid = cat_grid or getattr(self, '_preview_category_grid', None)
+        if cat_grid is None or not cat_grid.winfo_exists():
+            return
+        pool = getattr(self, '_preview_category_pool', None) or []
+        ranked = self._rank_category_pool(pool)
+        if not ranked:
+            return
+        self._render_more_category_cards(cat_grid, ranked[:3], gen)
+
     def _clear_preview_area(self):
         self._stop_preview_player()
+        self._preview_canvas = None
         area = getattr(self, '_preview_area', None)
         if not area:
             return
@@ -2970,37 +4087,11 @@ class ModernApp(ctk.CTk):
         # Canvas for VLC embedding
         canvas = tk.Canvas(player_container, bg='#000000', highlightthickness=0)
         canvas.pack(fill='both', expand=True)
+        canvas.bind('<Double-Button-1>', self._toggle_fullscreen_player, add='+')
+        self._preview_canvas = canvas
 
         # Control overlay bar below canvas
-        controls = ctk.CTkFrame(player_container, fg_color='#111115', height=40, corner_radius=0)
-        controls.pack(fill='x', side='bottom')
-
-        self._player_play_btn = ctk.CTkButton(
-            controls, text='▶', width=36, height=28,
-            fg_color='transparent', hover_color=BG_CARD_HOVER,
-            text_color=WHITE, font=(ui_font(), 12, 'bold'),
-            command=self._toggle_player_play)
-        self._player_play_btn.pack(side='left', padx=(6, 2), pady=4)
-
-        self._player_time_lbl = ctk.CTkLabel(
-            controls, text='00:00 / 00:00', text_color=TEXT_DIM,
-            font=('Consolas', 11))
-        self._player_time_lbl.pack(side='left', padx=6)
-
-        self._player_slider = ctk.CTkSlider(
-            controls, from_=0.0, to=1.0, height=14,
-            button_color=ACCENT, button_hover_color=ACCENT_HOVER,
-            progress_color=ACCENT, fg_color=BORDER,
-            command=self._on_player_seek)
-        self._player_slider.pack(side='left', fill='x', expand=True, padx=8)
-
-        ctk.CTkLabel(controls, text='🔊', text_color=TEXT_DIM, font=(ui_font(), 11)).pack(side='left', padx=(4, 0))
-        self._player_vol_slider = ctk.CTkSlider(
-            controls, from_=0.0, to=1.0, width=70, height=12,
-            button_color=TEXT_PRI, progress_color=ACCENT, fg_color=BORDER,
-            command=self._on_player_volume)
-        self._player_vol_slider.set(0.8)
-        self._player_vol_slider.pack(side='left', padx=(4, 8))
+        self._build_player_controls(player_container, fullscreen=False)
 
         # Start in-app VLC player if stream is playable
         if source.is_playable:
@@ -3173,12 +4264,14 @@ class ModernApp(ctk.CTk):
         )
         self._preview_q_btn.pack(side='left', padx=(0, 6))
 
-        # Download button (Separate download functionality, shows Downloading (52%), redirects when completed)
+        # Download button (Ghost button style)
         self._preview_dl_btn = ctk.CTkButton(
             actions_right, text=' ' + T('download_btn'), height=32, width=110,
             image=getattr(self, '_dl_icon', None),
-            corner_radius=CONTROL_RADIUS, fg_color=ACCENT,
-            hover_color=ACCENT_HOVER, text_color=WHITE,
+            corner_radius=CONTROL_RADIUS,
+            fg_color='transparent',
+            border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
             font=(ui_font(), 10, 'bold'),
             command=_direct_download
         )
@@ -3201,10 +4294,16 @@ class ModernApp(ctk.CTk):
 
         ctk.CTkFrame(info_card, height=1, fg_color=BORDER).pack(fill='x', padx=16)
 
-        desc_box = ctk.CTkFrame(info_card, fg_color='transparent')
-        desc_box.pack(fill='x', padx=16, pady=12)
+        info_body = ctk.CTkFrame(info_card, fg_color='transparent')
+        info_body.pack(fill='x', padx=16, pady=12)
+        info_body.grid_columnconfigure(0, weight=1)
 
-        def _desc_row(label, val, can_copy=False):
+        desc_box = ctk.CTkFrame(info_body, fg_color='transparent')
+        desc_box.grid(row=0, column=0, sticky='nsew')
+
+        self._preview_info_labels = {}
+
+        def _desc_row(label, val, can_copy=False, key=''):
             r = ctk.CTkFrame(desc_box, fg_color='transparent')
             r.pack(fill='x', pady=4)
             ctk.CTkLabel(
@@ -3214,6 +4313,8 @@ class ModernApp(ctk.CTk):
                 r, text=val, text_color=TEXT_PRI,
                 font=(ui_font(), 11), anchor='w', wraplength=400, justify='left')
             val_lbl.pack(side='left', fill='x', expand=True)
+            if key:
+                self._preview_info_labels[key] = val_lbl
 
             if can_copy:
                 def _copy():
@@ -3230,30 +4331,32 @@ class ModernApp(ctk.CTk):
                     font=(ui_font(), 9), command=_copy).pack(side='right', padx=(6, 0))
 
         # Metadata fields: Actor, Actress, Director, Studio, Tags, Duration, Format, URL
-        v_dict = getattr(self, '_preview_video', {}) or {}
+        payload = self._preview_info_payload()
+        _desc_row('Actor:', payload['actor'], key='actor')
+        _desc_row('Actress:', payload['actress'], key='actress')
+        _desc_row('Director:', payload['director'], key='director')
+        _desc_row('Studio:', payload['studio'], key='studio')
+        _desc_row('Tags:', payload['tags'], key='tags')
+        _desc_row('Duration:', payload['duration'], key='duration')
+        _desc_row('Media Format:', payload['format'], key='format')
+        _desc_row('Page URL:', payload['url'], can_copy=True, key='url')
+        _desc_row('Media Stream:', payload['stream'], can_copy=True, key='stream')
 
-        actor_val = str(v_dict.get('actor') or v_dict.get('models') or v_dict.get('star') or 'N/A')
-        actress_val = str(v_dict.get('actress') or v_dict.get('model') or v_dict.get('actor') or 'N/A')
-        director_val = str(v_dict.get('director') or v_dict.get('directors') or 'N/A')
-        studio_val = str(v_dict.get('studio') or v_dict.get('maker') or v_dict.get('publisher') or source.site_name or 'N/A')
+        # Actress portraits — inline, horizontally scrollable row below the
+        # Media Stream link, arranged in the order of the actresses.
+        photos_scroll = ctk.CTkScrollableFrame(
+            info_body, fg_color='transparent',
+            orientation='horizontal', height=138,
+            corner_radius=6,
+            scrollbar_button_color=BG_SIDEBAR,
+            scrollbar_button_hover_color=BG_CARD_HOVER)
+        self._preview_photos_scroll = photos_scroll
+        self._preview_photos_shown = False
 
-        raw_tags = v_dict.get('tags') or v_dict.get('categories') or v_dict.get('keywords') or []
-        if isinstance(raw_tags, (list, tuple, set)):
-            tags_val = ', '.join(str(t) for t in raw_tags if t) or 'HD, 1080p, Subtitled'
-        else:
-            tags_val = str(raw_tags or 'HD, 1080p, Subtitled')
-
-        _desc_row('Actor:', actor_val)
-        _desc_row('Actress:', actress_val)
-        _desc_row('Director:', director_val)
-        _desc_row('Studio:', studio_val)
-        _desc_row('Tags:', tags_val)
-        _desc_row('Duration:', source.duration or '2:13:53')
-        _desc_row('Media Format:', (source.media_kind or 'HLS').upper())
-        _desc_row('Page URL:', url or source.page_url or 'N/A', can_copy=True)
-
-        stream_url_val = source.media_url or 'N/A'
-        _desc_row('Media Stream:', stream_url_val, can_copy=True)
+        photos = (self._preview_video or {}).get('actress_photos') or []
+        single = (self._preview_video or {}).get('actress_photo') or ''
+        if photos or single:
+            self._load_actress_photos(photos or [single])
 
         # ── 4. "MORE FROM THIS CATEGORY" BOTTOM SECTION ─────────────────────
         cat_hdr = ctk.CTkFrame(left_main, fg_color='transparent')
@@ -3267,101 +4370,102 @@ class ModernApp(ctk.CTk):
         for c in range(3):
             cat_grid.grid_columnconfigure(c, weight=1, uniform='cat_cols')
 
-        v_list = getattr(self, '_videos', [])
+        # Collect candidate pool for recommendations (direct related + browse grid + saved + view history)
+        current_url = url
+        all_candidates = []
+        seen_cand_urls = set()
 
-        # Collect watched / viewed URLs to skip (view history + current video + preview history)
-        view_history_urls = {item.get('url') for item in config.get_view_history() if item.get('url')}
-        watched_urls = set(view_history_urls)
-        watched_urls.add(url)  # current video being viewed
-        if hasattr(self, '_preview_history') and self._preview_history:
-            for p_item in self._preview_history:
-                if isinstance(p_item, dict) and p_item.get('url'):
-                    watched_urls.add(p_item.get('url'))
+        def _add_cand(v):
+            if not isinstance(v, dict):
+                return
+            u = (v.get('url') or v.get('page_url') or '').strip()
+            if u and u != current_url and u not in seen_cand_urls:
+                seen_cand_urls.add(u)
+                cand_tags = []
+                for k in ('tags', 'categories', 'keywords'):
+                    raw = v.get(k)
+                    if isinstance(raw, (list, tuple, set)):
+                        for x in raw:
+                            s = str(x).strip()
+                            if s and s not in cand_tags:
+                                cand_tags.append(s)
+                    elif raw:
+                        for part in str(raw).split(','):
+                            s = part.strip()
+                            if s and s not in cand_tags:
+                                cand_tags.append(s)
+                all_candidates.append({
+                    'url': u,
+                    'title': v.get('title') or u,
+                    'thumbnail': v.get('thumbnail') or v.get('img') or '',
+                    'duration': v.get('duration') or '',
+                    'site_name': v.get('site_name') or config.site_name_from_url(u),
+                    'tags': cand_tags,
+                })
 
-        # Filter out watched & view history videos first
-        unwatched_candidates = [v for v in v_list if v.get('url') and v.get('url') not in watched_urls]
-        if len(unwatched_candidates) < 6:
-            unwatched_candidates = [v for v in v_list if v.get('url') and v.get('url') != url]
+        for v in (self._preview_video or {}).get('related_vids', []):
+            _add_cand(v)
+
+        for v in getattr(self, '_videos', []):
+            _add_cand(v)
+
+        for v in config.get_saved_videos():
+            _add_cand(v)
+
+        for v in config.get_view_history():
+            _add_cand(v)
+
+        # Fallback series search if candidate pool is small (< 6 items)
+        if len(all_candidates) < 6:
+            import re
+            code_m = re.search(r'([a-zA-Z]{2,6})[\-_ ]*\d{3,5}', title_text or url, re.IGNORECASE)
+            search_term = code_m.group(1).upper() if code_m else ''
+            if search_term:
+                try:
+                    site_key = getattr(self, '_site_key', 'MissAV')
+                    browser_cls = SITES.get(site_key, {}).get('browser')
+                    if browser_cls and hasattr(browser_cls, 'search'):
+                        extra_vids = browser_cls.search(search_term)
+                        if isinstance(extra_vids, list):
+                            for ev in extra_vids:
+                                _add_cand(ev)
+                except Exception:
+                    pass
 
         # Dynamic rotation per preview session so every session shows fresh related videos
-        shift = (getattr(self, '_preview_gen', 0) * 3) % max(len(unwatched_candidates), 1)
-        rotated_pool = unwatched_candidates[shift:] + unwatched_candidates[:shift]
+        shift = (getattr(self, '_preview_gen', 0) * 3) % max(len(all_candidates), 1)
+        rotated_pool = all_candidates[shift:] + all_candidates[:shift]
 
-        # Disjoint selection: "More from this category" gets first 3, "Related Videos" gets next 10 (zero duplicates)
-        display_vids = rotated_pool[:3]
-        used_category_urls = {v.get('url') for v in display_vids if v.get('url')}
+        # "More from this category": prefer the videos sharing the most tags with
+        # the currently played video. Same-code cross-site copies are excluded.
+        current_code = video_code(self._preview_video or {})
+        tag_pool = []
+        for i, v in enumerate(rotated_pool):
+            if current_code and video_code(v) == current_code:
+                continue
+            v['_tag_set'] = self._video_tag_set(v)
+            v['_tag_order'] = i
+            tag_pool.append(v)
+        self._preview_category_pool = tag_pool
+        self._preview_category_grid = cat_grid
+        self._preview_category_gen = getattr(self, '_preview_gen', 0)
+        self._preview_category_enriching = False
 
-        for v_idx, v_item in enumerate(display_vids):
-            v_url = v_item.get('url', '')
-            v_title = v_item.get('title', '')
-            v_dur = v_item.get('duration', '')
-            v_thumb = v_item.get('thumbnail', '')
+        ranked = self._rank_category_pool(tag_pool)
+        display_vids = ranked[:3] or rotated_pool[:3]
+        used_category_urls = {v['url'] for v in display_vids}
 
-            v_card = ctk.CTkFrame(
-                cat_grid, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
-                border_width=1, border_color=BORDER_CARD)
-            v_card.grid(row=0, column=v_idx, padx=4, sticky='nsew')
-
-            v_thumb_holder = ctk.CTkFrame(v_card, fg_color=BG_SIDEBAR, height=180, corner_radius=6)
-            v_thumb_holder.pack(fill='x', padx=4, pady=(4, 0))
-            v_thumb_holder.pack_propagate(False)
-
-            v_lbl = ctk.CTkLabel(v_thumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
-            v_lbl.pack(fill='both', expand=True)
-            if v_thumb:
-                self._load_thumb_async(v_thumb, v_lbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
-
-            if v_dur:
-                ctk.CTkLabel(
-                    v_thumb_holder, text=f' {v_dur} ', text_color=WHITE, fg_color='#000000',
-                    corner_radius=3, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
-
-            v_info = ctk.CTkFrame(v_card, fg_color='transparent')
-            v_info.pack(fill='x', padx=8, pady=(6, 8))
-
-            ctk.CTkLabel(
-                v_info, text=v_title, text_color=TEXT_PRI,
-                font=(ui_font(), 10, 'bold'), wraplength=220, justify='left', anchor='w').pack(anchor='w', fill='x', pady=(0, 4))
-
-            v_badges = ctk.CTkFrame(v_info, fg_color='transparent')
-            v_badges.pack(anchor='w', fill='x')
-
-            ctk.CTkLabel(
-                v_badges, text=getattr(self, '_site_key', 'JAVXY'), text_color=TEXT_DIM,
-                fg_color=BG_SIDEBAR, corner_radius=4, height=18, padx=6,
-                font=(ui_font(), 9, 'bold')).pack(side='left')
-
-            v_is_saved = config.is_video_saved(v_url)
-            v_heart_img = getattr(self, '_heart_active_icon', None) if v_is_saved else getattr(self, '_heart_icon', None)
-            v_heart_text = '' if v_heart_img else ('♥' if v_is_saved else '♡')
-
-            v_heart_btn = ctk.CTkButton(
-                v_badges, text=v_heart_text, image=v_heart_img,
-                width=24, height=22, corner_radius=4,
-                fg_color='transparent',
-                border_width=1, border_color=ACCENT if v_is_saved else BORDER_HOVER,
-                hover_color=BG_CARD_HOVER, text_color=ACCENT if v_is_saved else TEXT_PRI,
-                command=lambda item=v_item, u=v_url: self._on_card_heart_click(item, u)
-            )
-            v_heart_btn.pack(side='right')
-
-            def _bind_v(widget, item=v_item):
-                widget.bind('<Button-1>', lambda e: self._open_preview(item))
-                widget.configure(cursor='hand2')
-
-            _bind_v(v_card)
-            _bind_v(v_thumb_holder)
-            _bind_v(v_lbl)
-            _bind_v(v_info)
+        self._render_more_category_cards(cat_grid, display_vids, self._preview_gen)
+        self._enrich_category_tags(cat_grid, self._preview_gen)
 
         # ── 5. RELATED VIDEOS (DYNAMIC RESPONSIVE CONTAINER) ─────────────────
         bottom_related = ctk.CTkFrame(left_main, fg_color='transparent')
         bottom_related.pack(fill='x', pady=(8, 16))
 
-        related_candidates = [v for v in rotated_pool if v.get('url') and v.get('url') not in used_category_urls]
+        related_candidates = [v for v in rotated_pool if v['url'] not in used_category_urls]
         related_vids = related_candidates[:10]
         if not related_vids:
-            related_vids = [v for v in v_list if v.get('url') != url and v.get('url') not in used_category_urls][:10]
+            related_vids = rotated_pool[:10]
 
         self._preview_left_main = left_main
         self._preview_right_sidebar = right_sidebar
@@ -3766,8 +4870,10 @@ class ModernApp(ctk.CTk):
             proxy_actions.pack(fill='x', pady=(10, 2))
             ctk.CTkButton(
                 proxy_actions, text=T('proxy_save'), width=70, height=34,
-                corner_radius=CONTROL_RADIUS, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                text_color=WHITE, font=(ui_font(), 10, 'bold'),
+                corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                border_width=1, border_color=ACCENT,
+                hover_color=BG_CARD_HOVER, text_color=ACCENT,
+                font=(ui_font(), 10, 'bold'),
                 command=self._on_proxy_save).pack(
                     side='left', padx=(126, 6))
             ctk.CTkButton(
@@ -3935,8 +5041,10 @@ class ModernApp(ctk.CTk):
             cf_actions = ctk.CTkFrame(cf, fg_color='transparent')
             cf_actions.pack(fill='x', pady=(10, 2))
             ctk.CTkButton(cf_actions, text=T('cf_save'), width=70, height=34,
-                          corner_radius=CONTROL_RADIUS, fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                          text_color=WHITE, font=(ui_font(), 10, 'bold'),
+                          corner_radius=CONTROL_RADIUS, fg_color='transparent',
+                          border_width=1, border_color=ACCENT,
+                          hover_color=BG_CARD_HOVER, text_color=ACCENT,
+                          font=(ui_font(), 10, 'bold'),
                           command=self._on_cf_save).pack(
                               side='left', padx=(126, 6))
             ctk.CTkButton(cf_actions, text=T('cf_clear'), width=70, height=34,
@@ -3990,158 +5098,6 @@ class ModernApp(ctk.CTk):
                 border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
                 text_color=ACCENT, command=self._clear_saved_queue
             ).pack(side='left')
-
-        ACCENT_PALETTE = [
-            ('🟥 Vermilion', '#E63946'),
-            ('🟧 Orange', '#FF8C00'),
-            ('🟥 Red', '#E81123'),
-            ('🔴 Red/Coral', '#D13438'),
-            ('🩷 Dark Pink', '#C30052'),
-            ('🩷 Magenta', '#BF0077'),
-            ('🟣 Magenta Purple', '#9A0089'),
-            ('🟪 Purple', '#881798'),
-            ('🟪 Blue Purple', '#744DA9'),
-            ('🟩 Green', '#10893E'),
-            ('🟢 Dark Green', '#107C10'),
-            ('🟢 Teal Green', '#018574'),
-            ('🔵 Teal Blue', '#2D7D9A'),
-            ('🔵 Blue', '#0063B1'),
-            ('🟦 Indigo', '#6B69D6'),
-            ('🟪 Light Indigo', '#8E8CD8'),
-            ('🟣 Light Purple', '#8764B8'),
-            ('🟦 Teal', '#038387'),
-            ('🟧 Coral', '#F68048'),
-            ('🩶 Mint', '#B0E4CC'),
-            ('🟥 Pure Red', '#FF0000'),
-            ('🟡 Gold', '#FFCC00'),
-            ('🟡 Yellow', '#FFC349'),
-            ('🔵 Sky Blue', '#2196F3'),
-            ('🟡 Light Gold', '#FED24F'),
-        ]
-
-        def _refresh_accent_widgets():
-            current_cat = getattr(self, '_active_settings_cat', 'update')
-            self._switch_settings_cat(current_cat)
-            try:
-                self._theme_btn.configure(text="", image=self._get_theme_icon() or "")
-            except Exception:
-                pass
-
-            light = ACCENT[0] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
-            dark = ACCENT[1] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
-            light_dim = _dim_color(light, '#FFFFFF', 0.12)
-            dark_dim = _dim_color(dark, '#16161B', 0.18)
-            light_hover = _brighten(light_dim, 1.08)
-            dark_hover = _brighten(dark_dim, 1.08)
-
-            try:
-                btn = getattr(self, '_preview_dl_btn', None)
-                if btn is not None and btn.winfo_exists():
-                    _acc = ACCENT[0] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
-                    _acc_dark = ACCENT[1] if isinstance(ACCENT, (tuple, list)) else str(ACCENT or '')
-                    dl_bg = (_dim_color(_acc, '#FFFFFF', 0.12), _dim_color(_acc_dark, '#16161B', 0.18))
-                    dl_hover = (_brighten(dl_bg[0], 1.08), _brighten(dl_bg[1], 1.08))
-                    btn.configure(
-                        text=' ' + T('download_btn'),
-                        image=getattr(self, '_dl_icon', None),
-                        fg_color=dl_bg,
-                        border_width=1,
-                        border_color=ACCENT,
-                        hover_color=dl_hover,
-                        text_color=ACCENT,
-                        width=110,
-                        font=(ui_font(), 10, 'bold')
-                    )
-            except Exception:
-                pass
-
-            try:
-                btn = getattr(self, '_preview_heart_btn', None)
-                if btn is not None and btn.winfo_exists():
-                    preview_source = getattr(self, '_preview_source', None)
-                    url = (preview_source.page_url if preview_source else '') or (getattr(self, '_preview_video', {}) or {}).get('url', '')
-                    is_saved = bool(url and config.is_video_saved(url))
-                    if is_saved:
-                        btn.configure(fg_color=ACCENT, border_color=ACCENT, text_color=WHITE)
-                    else:
-                        btn.configure(fg_color='transparent', border_color=BORDER_HOVER, text_color=TEXT_PRI)
-            except Exception:
-                pass
-
-        def _on_accent_color_select(hex_color):
-            config.set_accent_color(hex_color)
-            apply_accent_color(hex_color)
-            self.after(60, _refresh_accent_widgets)
-
-        def render_customized_page(container):
-            for w in container.winfo_children():
-                w.destroy()
-
-            saved = config.get_accent_color() or '#E63946'
-
-            box = ctk.CTkFrame(container, fg_color='transparent')
-            box.pack(fill='both', expand=True)
-
-            ctk.CTkLabel(box, text='Customized', font=(ui_font(), 15, 'bold'),
-                         text_color=TEXT_PRI).pack(anchor='w')
-            ctk.CTkFrame(box, height=1, fg_color=BORDER).pack(fill='x', pady=(8, 14))
-
-            ctk.CTkLabel(box, text='Accent Color', text_color=TEXT_PRI,
-                         font=(ui_font(), 12, 'bold')).pack(anchor='w', pady=(0, 8))
-
-            def _render_palette_grid(parent, title, get_color, exclude_hex=None):
-                lbl = ctk.CTkLabel(parent, text=title, text_color=TEXT_SEC,
-                                   font=(ui_font(), 11, 'bold'))
-                lbl.pack(anchor='w', pady=(8, 4))
-                grid = ctk.CTkFrame(parent, fg_color='transparent')
-                grid.pack(fill='x', pady=(0, 4))
-                cols = 6
-                exclude_hex = set(h.upper() for h in (exclude_hex or []))
-                for idx, (base_label, hex_color) in enumerate(ACCENT_PALETTE):
-                    if hex_color.upper() in exclude_hex:
-                        continue
-                    row = idx // cols
-                    col = idx % cols
-                    display_color = get_color(hex_color)
-                    swatch = ctk.CTkButton(
-                        grid, text='', width=36, height=36,
-                        corner_radius=18,
-                        fg_color=display_color, hover_color=display_color,
-                        command=lambda h=hex_color: _on_accent_color_select(h)
-                    )
-                    swatch.grid(row=row, column=col, padx=6, pady=6, sticky='w')
-                    if hex_color.upper() == saved.upper():
-                        try:
-                            swatch.configure(border_width=3, border_color=WHITE)
-                        except Exception:
-                            pass
-
-            _render_palette_grid(
-                box,
-                'Preferred for Dark Mode (brighter)',
-                lambda h: h
-            )
-            _render_palette_grid(
-                box,
-                'Preferred for Light Mode (darker)',
-                lambda h: _dim_color(h, '#000000', 0.25),
-                exclude_hex=[
-                    '#F68048', '#B0E4CC', '#FF0000', '#FFCC00', '#FFC349',
-                    '#2196F3', '#FED24F', '#FF8C00',
-                    '#E81123', '#D13438', '#C30052', '#BF0077', '#9A0089'
-                ]
-            )
-
-            preview_row = ctk.CTkFrame(box, fg_color='transparent')
-            preview_row.pack(fill='x', pady=(8, 4))
-            ctk.CTkLabel(preview_row, text='Current:', text_color=TEXT_SEC,
-                         font=(ui_font(), 11)).pack(side='left', padx=(0, 10))
-            ctk.CTkLabel(preview_row, text=saved, text_color=TEXT_PRI,
-                         font=(ui_font(), 11, 'bold')).pack(side='left', padx=(0, 10))
-            cur_swatch = ctk.CTkButton(preview_row, text='', width=24, height=24,
-                                       corner_radius=12, fg_color=saved,
-                                       hover_color=saved, command=None)
-            cur_swatch.pack(side='left')
 
         def render_about_page(container):
             box = ctk.CTkFrame(container, fg_color='transparent')
@@ -4504,7 +5460,6 @@ class ModernApp(ctk.CTk):
             'proxy': render_proxy_page,
             'cf': render_cf_page,
             'queue': render_queue_page,
-            'customized': render_customized_page,
             'about': render_about_page,
         }
 
@@ -4518,7 +5473,6 @@ class ModernApp(ctk.CTk):
             ('proxy', '', T('proxy_card_title')),
             ('cf', '', T('cf_card_title')),
             ('queue', '', T('queue_settings_title') if 'queue_settings_title' in T.__code__.co_varnames else 'Save Download Queue'),
-            ('customized', '', 'Customized'),
             ('about', '', 'About')
         ]
 
@@ -4541,12 +5495,8 @@ class ModernApp(ctk.CTk):
             self._settings_nav_btns[cat_key] = btn
 
         # Display initial category and align responsive layout
-        stored_accent = config.get_accent_color()
-        if stored_accent:
-            apply_accent_color(stored_accent)
         self._switch_settings_cat('update')
         self._update_responsive_nav()
-        self.after(80, _refresh_accent_widgets)
 
     def _switch_settings_cat(self, selected_cat: str):
         self._active_settings_cat = selected_cat
@@ -5138,11 +6088,11 @@ class ModernApp(ctk.CTk):
                         dl_btn.configure(
                             text=' ' + T('download_btn'),
                             image=getattr(self, '_dl_icon', None),
-                            fg_color=ACCENT_BG,
+                            fg_color='transparent',
                             border_width=1,
-                            border_color=ACCENT_BORDER,
-                            hover_color=ACCENT_HOVER_COLOR,
-                            text_color=ACCENT_TEXT,
+                            border_color=BORDER_HOVER,
+                            hover_color=BG_CARD_HOVER,
+                            text_color=TEXT_PRI,
                             width=110,
                             font=(ui_font(), 10, 'bold')
                         )
@@ -5158,7 +6108,7 @@ class ModernApp(ctk.CTk):
         bottom_container = getattr(self, '_preview_bottom_related', None)
         related_vids = getattr(self, '_preview_related_vids', [])
 
-        if not left_main or not right_sidebar or not bottom_container or not related_vids:
+        if not left_main or not right_sidebar or not bottom_container:
             return
 
         if logical_width >= 1050:
@@ -5198,15 +6148,45 @@ class ModernApp(ctk.CTk):
 
         if target_mode == 'side_by_side':
             right_sidebar.pack_configure(side='right', fill='y', anchor='n', padx=(0, 24))
+            hdr_frame = ctk.CTkFrame(right_sidebar, fg_color='transparent')
+            hdr_frame.pack(fill='x', padx=10, pady=(0, 10))
+
+            ctk.CTkButton(
+                hdr_frame,
+                text='←',
+                width=24,
+                height=24,
+                corner_radius=4,
+                fg_color='transparent',
+                hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI,
+                font=(ui_font(), 15, 'bold'),
+                command=self._preview_navigate_back
+            ).pack(side='left', padx=(0, 6))
+
             ctk.CTkLabel(
-                right_sidebar, text='Related Videos', text_color=TEXT_PRI,
-                font=(ui_font(), 14, 'bold')).pack(anchor='w', padx=10, pady=(0, 10))
+                hdr_frame, text='Related Videos', text_color=TEXT_PRI,
+                font=(ui_font(), 14, 'bold')).pack(side='left')
             for rv in related_vids:
                 self._render_single_related_card(right_sidebar, rv, is_grid=False)
         else:
             right_sidebar.pack_forget()
             hdr_frame = ctk.CTkFrame(bottom_container, fg_color='transparent')
             hdr_frame.pack(fill='x', pady=(12, 8))
+
+            ctk.CTkButton(
+                hdr_frame,
+                text='←',
+                width=24,
+                height=24,
+                corner_radius=4,
+                fg_color='transparent',
+                hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI,
+                font=(ui_font(), 15, 'bold'),
+                command=self._preview_navigate_back
+            ).pack(side='left', padx=(0, 6))
+
             ctk.CTkLabel(
                 hdr_frame, text='Related Videos', text_color=TEXT_PRI,
                 font=(ui_font(), 14, 'bold')).pack(side='left')
@@ -5292,7 +6272,9 @@ class ModernApp(ctk.CTk):
             fg_color='transparent',
             border_width=1, border_color=ACCENT if r_is_saved else BORDER_HOVER,
             hover_color=BG_CARD_HOVER, text_color=ACCENT if r_is_saved else TEXT_PRI,
-            command=lambda item=rv, u=r_url: self._on_card_heart_click(item, u)
+        )
+        r_heart_btn.configure(
+            command=lambda item=rv, u=r_url, b=r_heart_btn: self._on_card_heart_click(item, u, b)
         )
         r_heart_btn.pack(side='right')
 
@@ -5316,7 +6298,7 @@ class ModernApp(ctk.CTk):
         _bind_rv(rlbl)
         _bind_rv(rinfo)
 
-    def _on_card_heart_click(self, video: dict, url: str):
+    def _on_card_heart_click(self, video: dict, url: str, btn_widget=None):
         target_url = url or (video or {}).get('url') or (video or {}).get('page_url') or ''
         if not target_url:
             return
@@ -5331,12 +6313,15 @@ class ModernApp(ctk.CTk):
         if hasattr(self, '_status_lbl') and self._status_lbl:
             self._status_lbl.configure(text=T('video_saved_toast') if new_saved else T('video_removed_toast'))
 
+        if btn_widget and hasattr(btn_widget, 'winfo_exists') and btn_widget.winfo_exists():
+            self._animate_heart_btn(btn_widget, new_saved)
+
         self._update_card_heart_btn(target_url, animate=True)
 
-        if getattr(self, '_browse_mode', '') == 'preview' and getattr(self, '_preview_source', None):
-            if self._preview_source.page_url == target_url:
+        if getattr(self, '_browse_mode', '') == 'preview':
+            if getattr(self, '_preview_source', None) and self._preview_source.page_url == target_url:
                 p_btn = getattr(self, '_preview_heart_btn', None)
-                if p_btn:
+                if p_btn and p_btn != btn_widget:
                     self._animate_heart_btn(p_btn, new_saved)
 
         if getattr(self, '_active_settings_cat', '') == 'saved':

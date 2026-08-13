@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 import requests
 
 import config
+from config import site_name_from_url
 from ssl_util import SharedSSLAdapter
 
 
@@ -51,17 +52,6 @@ class PreviewSource:
     @property
     def is_playable(self) -> bool:
         return bool(self.media_url and not self.error)
-
-
-def site_name_from_url(url: str) -> str:
-    host = (urlparse(url or '').netloc or '').lower()
-    if 'jable' in host or 'fs1.app' in host:
-        return 'JableTV'
-    if 'missav' in host:
-        return 'MissAV'
-    if 'supjav' in host:
-        return 'SupJav'
-    return host or 'Video'
 
 
 def resolve_preview_source(
