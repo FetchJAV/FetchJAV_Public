@@ -5,8 +5,8 @@
 <h1 align="center">FetchJAV</h1>
 
 <p align="center">
-  <strong>The Ultimate All-in-One Desktop Downloader, Video Streamer & AI Subtitle Generator</strong><br />
-  Supports <strong>JableTV</strong>, <strong>MissAV</strong>, and <strong>SupJav</strong> with automated speech recognition, instant preview proxy, and cross-site metadata matching.
+  <strong>The Ultimate Desktop Downloader, Video Streamer & AI Subtitle Generator</strong><br />
+  Stream, download, and automatically transcribe videos from <strong>JableTV</strong>, <strong>MissAV</strong>, and <strong>SupJav</strong> with local & cloud AI subtitle engines.
 </p>
 
 <p align="center">
@@ -25,63 +25,108 @@
 
 ---
 
-## ⚡ What Makes FetchJAV Superior?
-### Exclusive Features (Not in the Original JableTV Downloader)
+## 🌟 Key Features & Visual Walkthrough
 
-| Feature | FetchJAV | Original JableTV |
-|---|---|---|
-| **Direct Standalone .exe** | ✅ **`FetchJAV.exe`** with bundled FFmpeg, SSL certs, zero setup | ❌ Requires manual Python environment |
-| **Local AI Speech Recognition** | ✅ Built-in offline **ReazonSpeech** & **Whisper** ASR models | ❌ No speech-to-text |
-| **Automated Multi-Lingual Subtitles** | ✅ Auto-generates `.ja.srt`, `.en.srt`, `.zh-TW.srt` without touching MP4 | ❌ No subtitle generation |
-| **Cloud LLM Translation Option** | ✅ Supports OpenAI, Claude, DeepSeek, Ollama, Gemini API translation | ❌ None |
-| **Instant Streaming Video Preview** | ✅ Built-in local HTTP proxy with on-the-fly TS segment header repair | ❌ Must download entire video first |
-| **SupJav Multi-Server Support** | ✅ Instant TV server streaming + automatic mirror fallback | ❌ No SupJav or mirror failover |
-| **Modern Dark Theme & Customization** | ✅ CustomTkinter UI with accent color selector & responsive cards | ❌ Basic legacy interface |
-| **Persistent History & Queue** | ✅ Queue & completed history saved across restarts with 1-click re-download | ❌ Session lost on exit |
-| **Cross-Site Metadata Matching** | ✅ Cross-searches MissAV & SupJav to fill actress, studio, director & tags | ❌ Single-site only |
-| **System Tray Background Mode** | ✅ Minimize to tray via `pystray` with download completion alerts | ❌ No tray support |
-| **Network & SSL Crash Prevention** | ✅ Shared SSLContext & `curl_cffi` engine fixing Windows OpenSSL crashes | ❌ Common native SSL crashes |
+### 1. Multi-Site Browse & Discovery Gallery
+Browse, search, and filter videos across **JableTV**, **MissAV**, and **SupJav** in a single unified interface. Features responsive high-resolution cover cards, actress links, studio details, and multi-selection for bulk downloads.
+
+<p align="center">
+  <img src="./img/screenshots/02_browse_gallery.png" width="100%" alt="Multi-Site Browse & Discovery Gallery" />
+</p>
 
 ---
 
-## 📸 Screenshots & Interface Showcase
+### 2. Real-Time Streaming Video Preview
+Watch full streams directly inside FetchJAV before downloading! Built-in local HTTP streaming proxy automatically handles HTTP range requests, repairs segmented TS/MP4 chunks, and strips anti-scraping fake headers on the fly.
 
 <p align="center">
-  <strong>Browse & Search Gallery (JableTV, MissAV, SupJav)</strong><br />
-  <img src="./img/screenshots/browse_gallery.png" width="95%" alt="FetchJAV Browse Gallery" />
+  <img src="./img/screenshots/01_streaming_preview.png" width="100%" alt="Real-Time Streaming Video Preview" />
 </p>
 
 <p align="center">
-  <strong>Real-Time Streaming Video Preview</strong><br />
-  <img src="./img/screenshots/preview_player.png" width="95%" alt="FetchJAV Video Preview" />
+  <img src="./img/screenshots/06_video_player_controls.png" width="100%" alt="Video Player Controls" />
+</p>
+
+---
+
+### 3. High-Performance Multi-Threaded Download Manager
+Download multiple videos simultaneously with individual segment worker threads (1–16 workers per video), real-time bandwidth meters, segment progress trackers, and individual retry for interrupted chunks.
+
+<p align="center">
+  <img src="./img/screenshots/05_download_queue.png" width="100%" alt="High-Performance Download Queue" />
+</p>
+
+---
+
+### 4. Built-in Local & Cloud AI Subtitle Pipeline
+Automatically extract Japanese audio and generate `.ja.srt`, `.en.srt`, and `.zh-TW.srt` subtitle files right after downloading—without altering the original MP4 video:
+- **Local Offline ASR**: Integrated **ReazonSpeech** and **Whisper** speech recognition running directly on your CPU/GPU with zero cloud dependencies.
+- **AI Translation Options**: Optional integration with OpenAI, Claude, DeepSeek, Ollama, and Gemini API endpoints for precision subtitle translation.
+
+<p align="center">
+  <img src="./img/screenshots/04_ai_subtitles_config.png" width="100%" alt="AI Subtitle Configuration" />
 </p>
 
 <p align="center">
-  <strong>Multi-Threaded Download Queue with Speed Meter</strong><br />
-  <img src="./img/screenshots/download_queue.png" width="95%" alt="FetchJAV Download Queue" />
+  <img src="./img/screenshots/09_translation_models.png" width="100%" alt="Translation Model Settings" />
 </p>
 
-<p align="center">
-  <strong>AI Subtitles & Translation Settings (Local & LLM)</strong><br />
-  <img src="./img/screenshots/settings_subtitles.png" width="95%" alt="FetchJAV AI Subtitle Settings" />
-</p>
+---
+
+### 5. Persistent Download History & Metadata Inspector
+Never lose track of your library. All completed downloads and metadata (actresses, tags, release dates, video codes) are preserved across app restarts with 1-click folder opening and instant re-downloading.
 
 <p align="center">
-  <strong>Persistent Download History with Metadata & Tags</strong><br />
-  <img src="./img/screenshots/history_tab.png" width="95%" alt="FetchJAV Download History" />
+  <img src="./img/screenshots/03_download_history.png" width="100%" alt="Persistent Download History" />
+</p>
+
+---
+
+### 6. Modern Dark UI & Accent Color Customization
+Designed with a sleek CustomTkinter interface supporting high-DPI scaling, dark/light themes, and selectable accent color themes (Pink, Blue, Violet, Amber, Green).
+
+<p align="center">
+  <img src="./img/screenshots/08_theme_customization.png" width="100%" alt="Theme & Accent Customization" />
+</p>
+
+---
+
+### 7. Advanced Network & Proxy Architecture
+Full support for custom HTTP, HTTPS, SOCKS4, and SOCKS5 proxies, plus automatic synchronization with Windows manual proxy server settings. Built with `curl_cffi` and a shared SSLContext to eliminate native OpenSSL crash issues.
+
+<p align="center">
+  <img src="./img/screenshots/10_network_proxy_config.png" width="100%" alt="Network & Proxy Configuration" />
+</p>
+
+---
+
+### 8. System Tray Minimization & Background Operation
+Minimize FetchJAV to the Windows system tray via `pystray` to allow uninterrupted background batch downloading, complete with status notifications.
+
+<p align="center">
+  <img src="./img/screenshots/11_tray_behavior_settings.png" width="100%" alt="System Tray Settings" />
+</p>
+
+---
+
+### 9. Comprehensive General Settings
+Configure destination folders, default resolution preferences (Highest, 1080p, 720p, 480p, Lowest), multi-language UI selection (English, 繁體中文, 简体中文, 日本語), and auto-update checks.
+
+<p align="center">
+  <img src="./img/screenshots/07_general_settings.png" width="100%" alt="General Application Settings" />
 </p>
 
 ---
 
 ## 🚀 Windows: Quick Start in 30 Seconds
 
-1. **Download**: Grab **[FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe)**.
-2. **Launch**: Place the file in any writable folder and double-click to run. (No Python or external dependencies required).
-3. **Choose Language**: On first launch, select your language (English, 繁體中文, 简体中文, 日本語) and customize your dark/light theme and accent color.
+1. **Download**: Get the latest **[FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe)**.
+2. **Run**: Place it in any writable folder and double-click to launch (no Python or FFmpeg installation required).
+3. **Choose Language**: On first launch, pick your language and preferred theme.
 4. **Browse & Download**:
-   - Navigate to **Browse**, select a site (JableTV, MissAV, or SupJav), browse categories or search keywords.
-   - Select multiple cards and click **Add to Queue** or **Download Selected**.
-   - You can also paste URLs directly into the **Download** tab, or import batch URLs from `.txt` or `.csv` files.
+   - In **Browse**, choose JableTV, MissAV, or SupJav, search keywords or browse categories.
+   - Click preview to watch immediately, or select cards to add to the download queue.
+   - Paste URLs directly or import `.txt` / `.csv` batches in the **Download** tab.
 
 ---
 
@@ -129,29 +174,66 @@ When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/
 - If a crash occurred, attach `crash_log.txt` from beside the executable.
 
 ---
+---
 
 # 🇹🇼 繁體中文 (Traditional Chinese)
 
 ## FetchJAV
-**JableTV、MissAV、SupJav 的終極桌面下載器、串流預覽與 AI 生成字幕工具。**
+**JableTV、MissAV、SupJav 的桌面下載器、即時串流預覽與 AI 生成字幕工具。**
 
 ---
 
-### 🌟 FetchJAV 獨家強大功能（相較原版 JableTV）
+### 🌟 核心功能與圖文介紹
 
-| 功能項目 | FetchJAV | 原版 JableTV |
-|---|---|---|
-| **免安裝單一執行檔** | ✅ **`FetchJAV.exe`** 內建 FFmpeg、SSL 憑證，雙擊即開即用 | ❌ 需手動配置 Python 環境與套件 |
-| **本機 AI 語音辨識** | ✅ 內建離線 **ReazonSpeech** 與 **Whisper** 語音辨識模型 | ❌ 無字幕辨識功能 |
-| **自動多語字幕生成** | ✅ 下載後自動生成 `.ja.srt`、`.en.srt`、`.zh-TW.srt`，不破壞原影片 | ❌ 無字幕生成 |
-| **雲端 LLM 翻譯整合** | ✅ 支援接入 OpenAI、Claude、DeepSeek、Ollama、Gemini API | ❌ 無 |
-| **影片即時串流預覽** | ✅ 內建本機串流代理，支援 HTTP Range 播放並自動修復分段檔頭 | ❌ 必須整部下載完成才能觀看 |
-| **SupJav 多伺服器支援** | ✅ 優先選擇 TV 高速串流伺服器，遇阻斷自動切換備援鏡像 | ❌ 缺少多伺服器智慧容錯 |
-| **現代深色 UI 與主題自訂** | ✅ CustomTkinter 現代介面、多種主題強調色、自適應卡片清單 | ❌ 傳統舊版介面 |
-| **下載佇列與歷史記錄保存** | ✅ 重新開啟後保留佇列與已下載歷史，支援一鍵重新下載與開啟檔案 | ❌ 關閉軟體後狀態遺失 |
-| **跨站影音元數據檢索** | ✅ 自動跨 MissAV 與 SupJav 檢索補齊女優、片商、導演與標籤資訊 | ❌ 僅限單站基本資訊 |
-| **系統匣背景下載** | ✅ 支援縮小至系統匣背景下載與完成通知（使用 `pystray`） | ❌ 無系統匣功能 |
-| **連線安全與閃退修復** | ✅ 整合 `curl_cffi` 與共用 SSLContext，徹底解決 Windows SSL 崩潰問題 | ❌ 常見 OpenSSL 原生崩潰 |
+#### 1. 多平台瀏覽與挑片圖庫
+在單一介面中暢遊 **JableTV**、**MissAV** 與 **SupJav**，支援高畫質封面卡片、女優連結、片商資訊與批次多選下載。
+<p align="center">
+  <img src="./img/screenshots/02_browse_gallery.png" width="100%" alt="多平台瀏覽圖庫" />
+</p>
+
+#### 2. 即時影片串流預覽
+下載前可直接在軟體內點擊串流播放！內建本機 HTTP 串流代理伺服器，即時轉發 Range 請求並自動修復分段檔頭。
+<p align="center">
+  <img src="./img/screenshots/01_streaming_preview.png" width="100%" alt="即時串流預覽" />
+</p>
+
+#### 3. 高效能多執行緒下載佇列
+支援多部影片同時下載（1–32），每部影片自適應多工作執行緒（1–16），即時顯示速度計與進度條，斷點續傳獨立重試。
+<p align="center">
+  <img src="./img/screenshots/05_download_queue.png" width="100%" alt="下載佇列" />
+</p>
+
+#### 4. 本機離線與雲端 AI 字幕生成
+影片下載完成後自動擷取日語音軌，生成獨立 `.ja.srt`、`.en.srt`、`.zh-TW.srt` 字幕：
+- **本機離線辨識**：內建 **ReazonSpeech** 與 **Whisper** 模型，本機 CPU/GPU 快速推論。
+- **雲端 LLM 翻譯**：支援接入 OpenAI、Claude、DeepSeek、Ollama、Gemini 進行高品質翻譯。
+<p align="center">
+  <img src="./img/screenshots/04_ai_subtitles_config.png" width="100%" alt="AI 字幕設定" />
+</p>
+
+#### 5. 下載歷史記錄與影音資訊庫
+重開軟體依然完整保留已下載歷史，支援一鍵開啟資料夾、重新下載與女優標籤檢視。
+<p align="center">
+  <img src="./img/screenshots/03_download_history.png" width="100%" alt="歷史記錄分頁" />
+</p>
+
+#### 6. 現代深色 UI 與主題強調色自訂
+基於 CustomTkinter 打造，支援高解析度縮放與粉紅、藍、紫、琥珀、綠等多種主題強調色自訂。
+<p align="center">
+  <img src="./img/screenshots/08_theme_customization.png" width="100%" alt="主題自訂" />
+</p>
+
+#### 7. 代理伺服器與網路架構
+完整支援 HTTP、HTTPS、SOCKS4、SOCKS5 代理與 Windows 系統代理自動同步，徹底杜絕 Windows SSL 崩潰。
+<p align="center">
+  <img src="./img/screenshots/10_network_proxy_config.png" width="100%" alt="網路代理設定" />
+</p>
+
+#### 8. 系統匣背景下載
+支援縮小至 Windows 系統匣（System Tray）持續背景下載，並於完成時發送系統通知。
+<p align="center">
+  <img src="./img/screenshots/11_tray_behavior_settings.png" width="100%" alt="系統匣設定" />
+</p>
 
 ---
 
@@ -159,11 +241,7 @@ When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/
 
 1. **下載**：取得最新版 **[FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe)**。
 2. **執行**：將檔案放入任意可讀寫資料夾，**直接雙擊執行**（免安裝 Python、免額外配置）。
-3. **選擇偏好**：首次啟動可選擇介面語言（繁體中文、English、简体中文、日本語）並自訂外觀主題。
-4. **瀏覽與下載**：
-   - 點擊「瀏覽」切換 JableTV、MissAV 或 SupJav，輸入關鍵字搜尋或依分類篩選。
-   - 勾選多部影片加入佇列，或直接點擊開始下載。
-   - 亦可直接在「下載」分頁貼上網址，或從 `.txt` / `.csv` 檔案批次匯入。
+3. **開始使用**：在「瀏覽」選擇網站、搜尋關鍵字，點擊預覽或加入佇列下載。
 
 ---
 
