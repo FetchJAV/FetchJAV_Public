@@ -4054,8 +4054,8 @@ class ModernApp(ctk.CTk):
 
         modal = ctk.CTkToplevel(self)
         modal.overrideredirect(True)
-        modal_w = 520
-        modal_h = 650
+        modal_w = 560
+        modal_h = 660
         try:
             self.update_idletasks()
             pw = self.winfo_width()
@@ -4067,9 +4067,6 @@ class ModernApp(ctk.CTk):
             modal.geometry(f"{modal_w}x{modal_h}+{x}+{y}")
         except Exception:
             modal.geometry(f"{modal_w}x{modal_h}")
-        # Use the base-class resizable: CTkToplevel.resizable() re-runs
-        # _windows_set_titlebar_color on Windows, which withdraws the window
-        # again and can leave it stuck hidden.
         try:
             tk.Toplevel.resizable(modal, False, False)
         except Exception:
@@ -4101,13 +4098,23 @@ class ModernApp(ctk.CTk):
 
         # ── In-Popup Header Bar with Title, CC Badge & Close Button ────────
         header_bar = ctk.CTkFrame(
-            container, fg_color=BG_CARD, height=46, corner_radius=0
+            container, fg_color=BG_CARD, height=48, corner_radius=0
         )
         header_bar.pack(fill='x')
         header_bar.pack_propagate(False)
 
+        # Close button packed on the right FIRST so it is NEVER pushed off by long titles
+        close_btn = ctk.CTkButton(
+            header_bar, text='✕', width=32, height=32,
+            corner_radius=16, fg_color='transparent',
+            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+            font=(ui_font(), 13, 'bold'),
+            command=_close_modal
+        )
+        close_btn.pack(side='right', padx=10, pady=8)
+
         header_left = ctk.CTkFrame(header_bar, fg_color='transparent')
-        header_left.pack(side='left', padx=14, pady=8)
+        header_left.pack(side='left', fill='both', expand=True, padx=14, pady=8)
 
         cc_badge = ctk.CTkLabel(
             header_left, text='CC', text_color=WHITE, fg_color=ACCENT,
@@ -4118,18 +4125,10 @@ class ModernApp(ctk.CTk):
 
         title_lbl = ctk.CTkLabel(
             header_left, text=T('subtitle_title'),
-            text_color=TEXT_PRI, font=(ui_font(), 13, 'bold')
+            text_color=TEXT_PRI, font=(ui_font(), 13, 'bold'),
+            anchor='w'
         )
-        title_lbl.pack(side='left')
-
-        close_btn = ctk.CTkButton(
-            header_bar, text='✕', width=30, height=30,
-            corner_radius=15, fg_color='transparent',
-            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
-            font=(ui_font(), 13, 'bold'),
-            command=_close_modal
-        )
-        close_btn.pack(side='right', padx=10, pady=8)
+        title_lbl.pack(side='left', fill='x', expand=True)
 
         # Draggable header bar for frameless popup
         def _start_drag(event):
@@ -4266,10 +4265,13 @@ class ModernApp(ctk.CTk):
             # Off option
             is_off = (active_id is None)
             off_frame = ctk.CTkFrame(
-                tracks_scroll, fg_color=BG_CARD_HOVER if is_off else 'transparent',
-                corner_radius=4, height=36
+                tracks_scroll,
+                fg_color=BG_CARD_HOVER if is_off else 'transparent',
+                border_width=1.5 if is_off else 1,
+                border_color=ACCENT if is_off else BORDER,
+                corner_radius=6, height=42
             )
-            off_frame.pack(fill='x', pady=2, padx=4)
+            off_frame.pack(fill='x', pady=3, padx=4)
             off_frame.pack_propagate(False)
 
             def _select_off():
@@ -4277,9 +4279,18 @@ class ModernApp(ctk.CTk):
                 self._update_cc_button_state()
                 _refresh_track_list()
 
+            if is_off:
+                active_badge = ctk.CTkLabel(
+                    off_frame, text="✓ ACTIVE",
+                    text_color=WHITE, fg_color=ACCENT,
+                    corner_radius=4, height=20, padx=8,
+                    font=(ui_font(), 9, 'bold')
+                )
+                active_badge.pack(side='right', padx=(4, 10), pady=8)
+
             off_btn = ctk.CTkRadioButton(
                 off_frame, text=T('subtitle_off'),
-                text_color=TEXT_PRI if is_off else TEXT_DIM,
+                text_color=WHITE if is_off else TEXT_SEC,
                 fg_color=ACCENT, hover_color=ACCENT_HOVER,
                 font=(ui_font(), 11, 'bold' if is_off else 'normal'),
                 command=_select_off
@@ -4288,15 +4299,19 @@ class ModernApp(ctk.CTk):
                 off_btn.select()
             else:
                 off_btn.deselect()
-            off_btn.pack(side='left', padx=10, pady=6)
+            off_btn.pack(side='left', fill='both', expand=True, padx=10, pady=8)
+            off_frame.bind('<Button-1>', lambda e: _select_off())
 
             for track in current_tracks:
                 is_active = (track.id == active_id)
                 t_frame = ctk.CTkFrame(
-                    tracks_scroll, fg_color=BG_CARD_HOVER if is_active else 'transparent',
-                    corner_radius=4, height=40
+                    tracks_scroll,
+                    fg_color=BG_CARD_HOVER if is_active else 'transparent',
+                    border_width=1.5 if is_active else 1,
+                    border_color=ACCENT if is_active else BORDER,
+                    corner_radius=6, height=44
                 )
-                t_frame.pack(fill='x', pady=2, padx=4)
+                t_frame.pack(fill='x', pady=3, padx=4)
                 t_frame.pack_propagate(False)
 
                 def _make_select_cmd(tid=track.id):
@@ -4306,27 +4321,43 @@ class ModernApp(ctk.CTk):
                         _refresh_track_list()
                     return _cmd
 
+                sel_cmd = _make_select_cmd()
+
+                # Right badges (packed FIRST so right-side info is always aligned)
+                right_badge_box = ctk.CTkFrame(t_frame, fg_color='transparent')
+                right_badge_box.pack(side='right', padx=(4, 10), pady=8)
+
+                if is_active:
+                    ctk.CTkLabel(
+                        right_badge_box, text="✓ ACTIVE",
+                        text_color=WHITE, fg_color=ACCENT,
+                        corner_radius=4, height=20, padx=8,
+                        font=(ui_font(), 9, 'bold')
+                    ).pack(side='right', padx=(6, 0))
+
+                badge_text = track.source.value.upper() if hasattr(track.source, 'value') else str(track.source).upper()
+                ctk.CTkLabel(
+                    right_badge_box, text=badge_text,
+                    text_color=ACCENT if is_active else TEXT_DIM,
+                    fg_color=BG_DARK, corner_radius=3, height=20, padx=6,
+                    font=(ui_font(), 9, 'bold')
+                ).pack(side='right')
+
+                # Left side: Radio Button + Track Name with flexible expansion
                 r_btn = ctk.CTkRadioButton(
                     t_frame, text=track.name,
                     text_color=WHITE if is_active else TEXT_PRI,
                     fg_color=ACCENT, hover_color=ACCENT_HOVER,
                     font=(ui_font(), 11, 'bold' if is_active else 'normal'),
-                    command=_make_select_cmd()
+                    command=sel_cmd
                 )
                 if is_active:
                     r_btn.select()
                 else:
                     r_btn.deselect()
-                r_btn.pack(side='left', padx=10, pady=8)
+                r_btn.pack(side='left', fill='both', expand=True, padx=(10, 4), pady=8)
 
-                # Source badge
-                badge_text = track.source.value.upper() if hasattr(track.source, 'value') else str(track.source).upper()
-                ctk.CTkLabel(
-                    t_frame, text=badge_text,
-                    text_color=ACCENT if is_active else TEXT_DIM,
-                    fg_color=BG_DARK, corner_radius=3, height=18, padx=6,
-                    font=(ui_font(), 9)
-                ).pack(side='right', padx=10)
+                t_frame.bind('<Button-1>', lambda e, c=sel_cmd: c())
 
         _refresh_track_list()
 
@@ -4347,6 +4378,7 @@ class ModernApp(ctk.CTk):
                     sub_mgr.set_active_track(track.id, getattr(self, '_preview_player', None))
                     self._update_cc_button_state()
                     _refresh_track_list()
+                    _show_tracks()
                 except Exception as exc:
                     messagebox.showerror("Subtitle Error", f"{T('subtitle_error_load')}\n{exc}")
 
@@ -4400,51 +4432,44 @@ class ModernApp(ctk.CTk):
         manual_inner = ctk.CTkFrame(manual_card, fg_color='transparent')
         manual_inner.pack(fill='both', expand=True, padx=14, pady=12)
 
-        manual_top_row = ctk.CTkFrame(manual_inner, fg_color='transparent')
-        manual_top_row.pack(fill='x', pady=(0, 10))
+        ctk.CTkLabel(
+            manual_inner, text='Manual Timing Adjustment',
+            text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'), anchor='w'
+        ).pack(fill='x')
 
         ctk.CTkLabel(
-            manual_top_row, text='Manual Timing Offset',
-            text_color=TEXT_PRI, font=(ui_font(), 12, 'bold')
-        ).pack(side='left')
-
-        ctk.CTkLabel(
-            manual_top_row, text='Nudge +/- delay in seconds',
-            text_color=TEXT_DIM, font=(ui_font(), 10)
-        ).pack(side='right')
+            manual_inner,
+            text='Nudge subtitles earlier or later to match speech timing exactly.',
+            text_color=TEXT_SEC, font=(ui_font(), 10), anchor='w'
+        ).pack(fill='x', pady=(2, 8))
 
         def _offset_label_text(ms):
-            sign = '+' if ms >= 0 else '-'
-            return f"{sign}{abs(ms) / 1000.0:.1f}s"
+            if ms == 0:
+                return '0.0s (In Sync)'
+            sign = '+' if ms > 0 else '-'
+            return f"{sign}{abs(ms)/1000.0:.2f}s"
 
-        offset_var = ctk.StringVar(value=_offset_label_text(0))
+        offset_var = tk.StringVar(value=_offset_label_text(sub_mgr.get_sync_offset_ms()))
+        offset_display = ctk.CTkLabel(
+            manual_inner, textvariable=offset_var,
+            font=('Consolas', 18, 'bold'), text_color=ACCENT
+        )
+        offset_display.pack(pady=(4, 10))
 
-        def _apply_sync(step_ms):
-            current = sub_mgr.get_sync_offset_ms()
-            new_ms = sub_mgr.set_sync_offset_ms(
-                current + step_ms, getattr(self, '_preview_player', None))
-            offset_var.set(_offset_label_text(new_ms))
-            sync_status_lbl.configure(text='', text_color=TEXT_DIM)
+        def _apply_sync(delta_ms):
+            active = sub_mgr.get_active_track()
+            if not active:
+                return
+            applied = sub_mgr.adjust_sync_offset_ms(
+                delta_ms, getattr(self, '_preview_player', None))
+            offset_var.set(_offset_label_text(applied))
 
         def _apply_reset():
-            new_ms = sub_mgr.reset_sync_offset(getattr(self, '_preview_player', None))
-            offset_var.set(_offset_label_text(new_ms))
-            sync_status_lbl.configure(text='Offset reset to 0.0s', text_color=SUCCESS)
+            applied = sub_mgr.set_sync_offset_ms(
+                0, getattr(self, '_preview_player', None))
+            offset_var.set(_offset_label_text(applied))
 
-        # Digital Offset Readout Badge
-        offset_display_box = ctk.CTkFrame(
-            manual_inner, fg_color=BG_INPUT, corner_radius=CONTROL_RADIUS,
-            border_width=1, border_color=BORDER, height=48
-        )
-        offset_display_box.pack(fill='x', pady=(0, 12))
-        offset_display_box.pack_propagate(False)
-
-        ctk.CTkLabel(
-            offset_display_box, textvariable=offset_var,
-            text_color=ACCENT, font=(ui_font(), 20, 'bold')
-        ).pack(expand=True)
-
-        # Step Buttons (Regular outline, evenly gridded)
+        # Quick step buttons in a responsive grid
         step_btn_row = ctk.CTkFrame(manual_inner, fg_color='transparent')
         step_btn_row.pack(fill='x', pady=(0, 8))
         for col_idx in range(4):
@@ -4495,7 +4520,6 @@ class ModernApp(ctk.CTk):
             text_color=TEXT_SEC, font=(ui_font(), 10), wraplength=440, justify='left', anchor='w'
         ).pack(fill='x', pady=(2, 10))
 
-        # Ghost Auto Sync Button with Primary Color Boundary
         auto_btn = ctk.CTkButton(
             auto_inner, text='⚡ Auto Sync with Audio', height=38,
             fg_color='transparent', hover_color=ACCENT_DIM,
@@ -4648,54 +4672,65 @@ class ModernApp(ctk.CTk):
         def _append_result_card(res):
             card = ctk.CTkFrame(
                 results_scroll, fg_color=BG_DARK,
-                corner_radius=4, border_width=1, border_color=BORDER
+                corner_radius=6, border_width=1, border_color=BORDER
             )
             card.pack(fill='x', pady=4, padx=4)
 
+            # Pack button on the right FIRST so it is NEVER pushed off or hidden by long titles
+            dl_btn = ctk.CTkButton(
+                card, text='Download & Use', width=120, height=32,
+                fg_color='transparent', hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
+                corner_radius=CONTROL_RADIUS,
+                font=(ui_font(), 10, 'bold'),
+                command=lambda: _dl_action(res, dl_btn)
+            )
+            dl_btn.pack(side='right', padx=(6, 10), pady=8)
+
+            # Then pack info box on the left with wrapping support
             info_box = ctk.CTkFrame(card, fg_color='transparent')
-            info_box.pack(side='left', fill='both', expand=True, padx=10, pady=8)
+            info_box.pack(side='left', fill='both', expand=True, padx=(10, 6), pady=8)
 
             ctk.CTkLabel(
                 info_box, text=res.title, text_color=TEXT_PRI,
-                font=(ui_font(), 11, 'bold'), anchor='w', justify='left'
-            ).pack(anchor='w')
+                font=(ui_font(), 11, 'bold'), anchor='w', justify='left',
+                wraplength=340
+            ).pack(fill='x', anchor='w')
 
             meta_sub = ctk.CTkLabel(
                 info_box, text=f"Language: {res.language} • Provider: {res.provider}",
                 text_color=TEXT_DIM, font=(ui_font(), 9), anchor='w'
             )
-            meta_sub.pack(anchor='w', pady=(2, 0))
+            meta_sub.pack(fill='x', anchor='w', pady=(2, 0))
 
-            def _make_download_cmd(target_res=res):
-                def _dl():
-                    status_lbl.configure(text=T('subtitle_downloading'), text_color=ACCENT)
+        def _dl_action(res, btn_widget):
+            status_lbl.configure(text=T('subtitle_downloading'), text_color=ACCENT)
+            try:
+                btn_widget.configure(state='disabled', text='Downloading…')
+            except Exception:
+                pass
 
-                    def _on_dl_done(track, dl_err):
-                        def _dl_ui():
-                            if dl_err or not track:
-                                status_lbl.configure(
-                                    text=str(dl_err or T('subtitle_error_load')), text_color=ERROR_C)
-                            else:
-                                status_lbl.configure(
-                                    text=f"Downloaded: {track.name}", text_color=SUCCESS)
-                                self._update_cc_button_state()
-                                _refresh_track_list()
-                        try:
-                            self.after(0, _dl_ui)
-                        except Exception:
-                            pass
+            def _on_dl_done(track, dl_err):
+                def _dl_ui():
+                    try:
+                        btn_widget.configure(state='normal', text='Download & Use')
+                    except Exception:
+                        pass
+                    if dl_err or not track:
+                        status_lbl.configure(
+                            text=str(dl_err or T('subtitle_error_load')), text_color=ERROR_C)
+                    else:
+                        status_lbl.configure(
+                            text=f"✓ Downloaded & Activated: {track.name}", text_color=SUCCESS)
+                        self._update_cc_button_state()
+                        _refresh_track_list()
+                        _show_tracks()
+                try:
+                    self.after(0, _dl_ui)
+                except Exception:
+                    pass
 
-                    sub_mgr.download_online_track_async(target_res, on_complete=_on_dl_done)
-                return _dl
-
-            ctk.CTkButton(
-                card, text='Download & Use', width=120, height=30,
-                fg_color='transparent', hover_color=BG_CARD_HOVER,
-                text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
-                corner_radius=CONTROL_RADIUS,
-                font=(ui_font(), 10, 'bold'),
-                command=_make_download_cmd()
-            ).pack(side='right', padx=10, pady=8)
+            sub_mgr.download_online_track_async(res, on_complete=_on_dl_done)
 
         def _do_search():
             q = query_entry.get().strip()
@@ -4741,22 +4776,73 @@ class ModernApp(ctk.CTk):
                     if error_msg:
                         status_lbl.configure(text=error_msg, text_color=ERROR_C)
                         return
-                    added = 0
                     for res in results:
                         key = (res.provider, res.download_url, res.title)
                         if key in _result_seen:
                             continue
                         _result_seen.add(key)
                         _append_result_card(res)
-                        added += 1
+
                     if not _result_seen:
+                        for child in results_scroll.winfo_children():
+                            child.destroy()
+
+                        empty_box = ctk.CTkFrame(
+                            results_scroll, fg_color=BG_DARK, corner_radius=CARD_RADIUS,
+                            border_width=1, border_color=BORDER_CARD
+                        )
+                        empty_box.pack(fill='both', expand=True, padx=8, pady=24)
+
                         ctk.CTkLabel(
-                            results_scroll, text=T('subtitle_no_results'),
-                            text_color=TEXT_DIM, font=(ui_font(), 12)
-                        ).pack(expand=True, pady=40)
-                    status_lbl.configure(
-                        text=f"Found {len(_result_seen)} subtitle(s)",
-                        text_color=TEXT_DIM if _result_seen else ERROR_C)
+                            empty_box, text="🔍", font=(ui_font(), 32), text_color=TEXT_DIM
+                        ).pack(pady=(20, 6))
+
+                        ctk.CTkLabel(
+                            empty_box, text=T('subtitle_no_results'),
+                            text_color=TEXT_PRI, font=(ui_font(), 12, 'bold')
+                        ).pack(pady=(0, 6))
+
+                        ctk.CTkLabel(
+                            empty_box,
+                            text=T('subtitle_no_results_desc', query=q),
+                            text_color=TEXT_SEC, font=(ui_font(), 10),
+                            wraplength=380, justify='center'
+                        ).pack(padx=20, pady=(0, 16))
+
+                        # Quick action buttons inside empty state
+                        empty_btns = ctk.CTkFrame(empty_box, fg_color='transparent')
+                        empty_btns.pack(pady=(0, 20))
+
+                        ctk.CTkButton(
+                            empty_btns, text="📁 " + T('subtitle_load_file'), height=32,
+                            fg_color=BG_CARD_HOVER, hover_color=BG_CARD,
+                            text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
+                            corner_radius=CONTROL_RADIUS, font=(ui_font(), 10, 'bold'),
+                            command=_on_load_local_file
+                        ).pack(side='left', padx=6)
+
+                        v_code = video_code(self._preview_video) if getattr(self, '_preview_video', None) else ""
+                        if v_code and v_code.lower() != q.lower():
+                            def _search_code_only():
+                                query_entry.delete(0, 'end')
+                                query_entry.insert(0, v_code)
+                                _do_search()
+
+                            ctk.CTkButton(
+                                empty_btns, text=f"🔍 Search '{v_code}'", height=32,
+                                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                                text_color=WHITE, corner_radius=CONTROL_RADIUS,
+                                font=(ui_font(), 10, 'bold'),
+                                command=_search_code_only
+                            ).pack(side='left', padx=6)
+
+                        status_lbl.configure(
+                            text=f"No subtitles found for '{q}'",
+                            text_color=TEXT_DIM)
+                    else:
+                        status_lbl.configure(
+                            text=f"Found {len(_result_seen)} subtitle(s)",
+                            text_color=TEXT_DIM)
                 try:
                     self.after(0, _ui_update)
                 except Exception:
