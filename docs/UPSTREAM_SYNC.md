@@ -35,16 +35,26 @@ since the fork base:
 
 - **fetchjav_owned** — never auto-modified by the tool. Upstream changes are
   reported as `[review]`; you decide whether to extract anything manually.
-  Includes the FetchJAV UI/theme/branding/features: `gui_modern.py`,
-  `ui_theme.py`, `args.py` (FetchJAV CLI flags like `--hot-reload`), `.gitignore`,
-  `README*`, `updater.py`, `video_preview.py`, `hot_reload.py`, `subtitle/**`,
-  `metadata_fetcher.py`, custom icons/logos, and FetchJAV-only tests.
+  Reserved for files/features **FetchJAV itself added or modified** — NOT for
+  inherited files it merely kept. Includes the FetchJAV UI/theme/branding:
+  `gui_modern.py`, `ui_theme.py`, `README*`, `updater.py`, `video_preview.py`,
+  `translation_settings_ui.py`, `subtitle/**`, `metadata_fetcher.py`, custom
+  icons/logos, and FetchJAV-only tests. `.gitignore` is an exception: it is
+  protected for *functional* safety (build hygiene), not provenance.
 - **upstream_owned** — safe to take upstream's version automatically when
   FetchJAV has not diverged (prefer "theirs" on conflict). Used for upstream-only
   helpers/readme assets.
 - **shared** (the default) — automatic 3-way merge with the fork base. Clean
   merges apply; conflicts are reported as `[conflict]` and FetchJAV's copy is
-  left in place for manual resolution.
+  left in place for manual resolution. Inherited-but-kept files upstream deleted
+  (e.g. `hot_reload.py`, `preview_block.txt`) stay shared and are simply **kept**.
+- **preserve** (in ownership.json) — a finer-grained map for shared files.
+  Each entry is a block of lines (matching the fork base exactly) plus an
+  `insert_before` anchor. When upstream removed that block, the tool re-inserts
+  it and adds a `[review]` entry so a FetchJAV-kept feature never silently
+  disappears with an upstream refactor. Example: `args.py` keeps the
+  `--hot-reload` / `--watch-interval` flags even though upstream deleted the
+  whole hot-reload feature.
 
 ### Why these files are protected (learned the hard way)
 
@@ -53,10 +63,9 @@ since the fork base:
   region. `translation_settings_ui.py` failed to import afterwards. Upstream
   theme changes are surfaced for manual review instead of auto-merged.
 - **`args.py`** — upstream removed the `--hot-reload` / `--watch-interval`
-  flags when they deleted the hot-reload feature. Because FetchJAV had not
-  edited `args.py` since the fork, the tool adopted upstream's removal and the
-  `hot_reload` CLI test failed. Files tied to FetchJAV features that upstream
-  deleted are classified fetchjav-owned.
+  flags when they deleted the hot-reload feature. The fix is the **preserve
+  map** (not whole-file ownership): `args.py` stays shared so upstream's other
+  CLI improvements flow in, and the kept block is re-inserted automatically.
 - **Rule of thumb**: when upstream deletes a feature, expect the affected
   shared files (`args.py`, `main.py`, `config.py`, `gui.py`, `locales.py`) to
   need a manual look — the test gate is designed to catch this.
@@ -143,10 +152,13 @@ A fake upstream release `fake-upstream-v2.6.0` was created to prove the flow:
 | `browser.py` — thumbnail timeout 20 -> 30 | merged | present |
 | `subtitle_engine.py` — `lang_filter=` param | merged | present |
 | `requirements.txt` — `requests>=2.32.0` | adopted | present |
+| `args.py` — removed `--hot-reload`/`--watch-interval` | adopted + preserve re-inserts block | flags present, 11 hot_reload tests pass |
 | `gui_modern.py` — UI label change | NOT adopted (review) | gui_modern.py identical to `main` |
 
 Validation: 670/670 tests pass; FetchJAV features (`subtitle/`, preview,
-hot_reload, history) all present; `--hot-reload` CLI flag retained.
+hot_reload, history) all present; `--hot-reload` CLI flag retained via the
+preserve map; inherited kept files (`hot_reload.py`, `preview_block.txt`) are
+kept, not deleted.
 
 ## Known follow-ups
 

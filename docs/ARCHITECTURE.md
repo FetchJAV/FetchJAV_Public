@@ -10,10 +10,10 @@ JableTV/                                   (outer wrapper repo)
 └── JableTV-MissAV-Downloader-GUI-2026-master/   (canonical FetchJAV repo — all work happens here)
     ├── gui_modern.py                      FetchJAV UI (ModernApp class ~line 1417) — fetchjav-owned
     ├── ui_theme.py                        FetchJAV theme/design system — fetchjav-owned
-    ├── args.py                            CLI flags incl. --hot-reload — fetchjav-owned
+    ├── args.py                            CLI flags incl. --hot-reload — shared, hot-reload block via preserve map
     ├── video_preview.py                   in-app video preview player — fetchjav-owned
     ├── metadata_fetcher.py                cross-site metadata search — fetchjav-owned
-    ├── hot_reload.py                      dev hot-reload watcher — fetchjav-owned
+    ├── hot_reload.py                      dev hot-reload watcher — shared (kept; upstream deleted it)
     ├── updater.py                         self-updater (points at FetchJAV releases) — fetchjav-owned
     ├── translation_settings_ui.py         translation settings screen — fetchjav-owned
     ├── subtitle/                          FetchJAV subtitle package — fetchjav-owned
@@ -35,7 +35,8 @@ JableTV/                                   (outer wrapper repo)
 - `origin` = FetchJAV, `upstream` = Alos21750's project. Sync uses local
   branches only; `main` is the integration branch.
 - `docs/sync/ownership.json` partitions files into `fetchjav_owned`,
-  `upstream_owned`, and `shared` — the contract that keeps auto-sync safe.
+  `upstream_owned`, and `shared`, plus a `preserve` map for kept-feature blocks —
+  the contract that keeps auto-sync safe.
 
 ## Feature inventory (FetchJAV-specific)
 
@@ -65,6 +66,7 @@ These are the FetchJAV deliverables that the sync must always preserve:
   translation/LLM stack (`llm_translation.py`, `translation_settings.py`),
   build tooling (`build_tmp/gen_version.py`, spec files), dependency bumps
   (`requirements.txt`).
-- Danger spots where auto-merge is unsafe: `ui_theme.py`, `args.py`,
-  `gui_modern.py`, `locales.py`, `.gitignore`. These are fetchjav-owned or
-  conflict-prone and are always surfaced for manual review.
+- Danger spots where auto-merge is unsafe: `ui_theme.py`, `gui_modern.py`,
+  `locales.py`, `.gitignore`. These are fetchjav-owned or conflict-prone and are
+  always surfaced for manual review. `args.py` is shared but protected by a
+  `preserve` rule that re-inserts the `--hot-reload`/`--watch-interval` block.
