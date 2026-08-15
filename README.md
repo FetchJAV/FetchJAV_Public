@@ -11,21 +11,21 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Alos21750/FetchJAV/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alos21750/FetchJAV?style=flat-square&label=release&color=ff5263" /></a>
-  <a href="https://github.com/Alos21750/FetchJAV/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/Alos21750/FetchJAV/total?style=flat-square&label=downloads&color=2ea44f" /></a>
-  <a href="https://github.com/Alos21750/FetchJAV"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Alos21750/FetchJAV?style=flat-square&logo=github&color=f5b942" /></a>
-  <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/github/license/Alos21750/FetchJAV?style=flat-square" /></a>
-  <a href="https://github.com/Alos21750/FetchJAV/pkgs/container/jabletv"><img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" /></a>
+  <a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alos21750/JableTV-MissAV-Downloader-GUI-2026?style=flat-square&label=release&color=ff5263" /></a>
+  <a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/Alos21750/JableTV-MissAV-Downloader-GUI-2026/total?style=flat-square&label=downloads&color=2ea44f" /></a>
+  <a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026"><img alt="GitHub stars" src="https://img.shields.io/github/stars/Alos21750/JableTV-MissAV-Downloader-GUI-2026?style=flat-square&logo=github&color=f5b942" /></a>
+  <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/github/license/Alos21750/JableTV-MissAV-Downloader-GUI-2026?style=flat-square" /></a>
+  <a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/pkgs/container/jabletv"><img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" /></a>
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/Alos21750/FetchJAV/releases/latest/download/JableTV_Modern.exe">下載 Modern</a></strong>
+  <strong><a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest/download/JableTV_Modern.exe">下載 Modern</a></strong>
   ·
-  <strong><a href="https://github.com/Alos21750/FetchJAV/releases/latest/download/Jable_smalltool.exe">下載 SmallTool</a></strong>
+  <strong><a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest/download/Jable_smalltool.exe">下載 SmallTool</a></strong>
   ·
-  <a href="https://github.com/Alos21750/FetchJAV/releases/latest">SmallTool portable ZIP（v2.5.38 起）</a>
+  <a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest">SmallTool portable ZIP（v2.5.38 起）</a>
   ·
-  <a href="https://github.com/Alos21750/FetchJAV/releases/latest">查看最新版本</a>
+  <a href="https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest">查看最新版本</a>
 </p>
 
 > [!TIP]
@@ -48,7 +48,7 @@
 
 ## Windows：30 秒開始
 
-1. 下載 [JableTV_Modern.exe](https://github.com/Alos21750/FetchJAV/releases/latest/download/JableTV_Modern.exe) 或 [Jable_smalltool.exe](https://github.com/Alos21750/FetchJAV/releases/latest/download/Jable_smalltool.exe)。
+1. 下載 [JableTV_Modern.exe](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest/download/JableTV_Modern.exe) 或 [Jable_smalltool.exe](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases/latest/download/Jable_smalltool.exe)。
 2. 把檔案放在可寫入的資料夾，直接雙擊執行。
 3. 首次開啟選擇語言；之後可隨時切換繁體中文、简体中文、English、日本語與明／暗主題。
 
@@ -123,7 +123,7 @@ SmallTool 可設為每 1–168 小時自動檢查，或每天依這台電腦的�
 需要 **Python 3.10+** 與 Tk。舊 README 的 Python 3.8+ 已不符合目前原始碼語法需求。
 
 ```bash
-git clone https://github.com/Alos21750/FetchJAV.git
+git clone https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026.git
 cd FetchJAV
 python -m pip install -r requirements.txt
 
@@ -171,7 +171,7 @@ Docker 是無介面、執行完即結束的下載工作，不包含 Modern 或 S
 
 ## 遇到問題
 
-開 [GitHub Issue](https://github.com/Alos21750/FetchJAV/issues/new) 時，請提供：
+開 [GitHub Issue](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/issues/new) 時，請提供：
 
 - App 版本、使用的工具與作業系統。
 - 網站與可重現網址，以及預期／實際結果。
@@ -199,6 +199,6 @@ GitHub 在 2026 年 7 月限制 stargazer 清單存取，舊的匿名 Star Histo
 
 程式碼採 [Apache License 2.0](./LICENSE)。本工具僅供合法的個人與研究用途；請遵守所在地法律、網站條款與內容權利，只下載你有權取得的內容。
 
-版本變更與已修復問題請看 [Releases](https://github.com/Alos21750/FetchJAV/releases)。
+版本變更與已修復問題請看 [Releases](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases)。
 
 <p align="center">Built and maintained by <a href="https://github.com/Alos21750">ALOS</a>.</p>

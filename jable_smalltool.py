@@ -2459,6 +2459,31 @@ class SmallToolApp(ctk.CTk):
             text_color=TEXT_DIM, font=(font_family, 8),
             wraplength=286, justify='right').pack(
                 anchor='e', pady=(3, 0))
+
+        prefetch_row = ctk.CTkFrame(res_group, fg_color='transparent')
+        prefetch_row.pack(fill='x', pady=(6, 0))
+        self._subtitle_prefetch_btn = ctk.CTkButton(
+            prefetch_row, text=T('subtitle_prefetch_button'),
+            width=108, height=32, corner_radius=CONTROL_RADIUS,
+            fg_color='transparent', border_width=1,
+            border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, font=(font_family, 9, 'bold'),
+            command=self._prefetch_subtitle_models)
+        self._subtitle_prefetch_btn.pack(side='right')
+        self._subtitle_prefetch_status = ctk.CTkLabel(
+            prefetch_row, text='', text_color=TEXT_SEC,
+            font=(font_family, 8), anchor='w')
+        self._subtitle_prefetch_status.pack(
+            side='right', fill='x', expand=True, padx=(0, 8))
+        if getattr(self, '_subtitle_prefetching', False):
+            self._subtitle_prefetch_btn.configure(state='disabled')
+        self._subtitle_prefetch_status.configure(
+            text=getattr(self, '_subtitle_prefetch_status_text', ''))
+        ctk.CTkLabel(
+            res_group, text=T('subtitle_prefetch_desc'),
+            text_color=TEXT_DIM, font=(font_family, 8),
+            wraplength=286, justify='right').pack(
+                anchor='e', pady=(3, 0))
         # Apply saved preference immediately (before auto-start)
         from M3U8Sites.M3U8Crawler import set_resolution_pref
         set_resolution_pref(self._cfg.get('resolution', 'highest'))
@@ -3399,6 +3424,74 @@ class SmallToolApp(ctk.CTk):
             self._recognition_quality_from_label(val))
         self._recognition_quality_var.set(
             self._recognition_quality_label(quality))
+
+    def _prefetch_subtitle_models(self):
+        if getattr(self, '_subtitle_prefetching', False):
+            return
+        if not messagebox.askyesno(
+                T('subtitle_prefetch_confirm_title'),
+                T('subtitle_prefetch_confirm_body')):
+            return
+        self._subtitle_prefetching = True
+        self._subtitle_prefetch_status_text = T('subtitle_prefetch_started')
+        self._subtitle_prefetch_btn.configure(state='disabled')
+        self._subtitle_prefetch_status.configure(
+            text=self._subtitle_prefetch_status_text)
+        threading.Thread(
+            target=self._prefetch_subtitle_models_worker,
+            daemon=True).start()
+
+    def _prefetch_subtitle_models_worker(self):
+        from subtitle_engine import prefetch_subtitle_models
+        stage_keys = {
+            'runtime': 'subtitle_stage_runtime',
+            'model': 'subtitle_stage_model',
+            'translation_model': 'subtitle_stage_translation_model',
+        }
+
+        def _progress(stage, percent):
+            text = T(stage_keys.get(stage, stage))
+            if percent is not None:
+                text = f'{text} · {percent}%'
+            self.after(0, lambda: self._set_subtitle_prefetch_status(text))
+
+        try:
+            summary = prefetch_subtitle_models(
+                progress_callback=_progress,
+                cancel_check=lambda: self._is_closing)
+            status = T('subtitle_prefetch_done')
+            if not summary.get('translation'):
+                status = (
+                    f"{status} · {T('subtitle_prefetch_translation_skipped')}")
+            self.after(
+                0, lambda: self._set_subtitle_prefetch_status(status))
+        except Exception as exc:
+            message = str(exc or '').strip() or exc.__class__.__name__
+            self.after(0, lambda: self._set_subtitle_prefetch_status(
+                T('subtitle_prefetch_error', error=message)))
+        finally:
+            self._subtitle_prefetching = False
+            self.after(
+                0, lambda: self._set_subtitle_prefetch_button_enabled())
+
+    def _set_subtitle_prefetch_status(self, text):
+        self._subtitle_prefetch_status_text = text
+        label = getattr(self, '_subtitle_prefetch_status', None)
+        if label is not None:
+            try:
+                label.configure(text=text)
+            except Exception:
+                pass
+
+    def _set_subtitle_prefetch_button_enabled(self):
+        if getattr(self, '_subtitle_prefetching', False):
+            return
+        btn = getattr(self, '_subtitle_prefetch_btn', None)
+        if btn is not None:
+            try:
+                btn.configure(state='normal')
+            except Exception:
+                pass
 
     def _auto_start_worker(self):
         if not self._is_closing:

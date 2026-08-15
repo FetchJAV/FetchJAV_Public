@@ -306,3 +306,81 @@ def test_row_retry_resets_transient_fields_and_requeues():
 
     assert (item.progress, item.speed, item.error) == (0, '', '')
     assert app._dlmgr.calls == [(item.url, r'C:\Videos')]
+
+
+def test__visible_window_latest_downloading_at_top():
+    items = [
+        _item('https://example.com/dl1', '下載中'),
+        _item('https://example.com/dl2', '下載中'),
+        _item('https://example.com/dl3', '下載中'),
+    ]
+    visible = _visible_window(items, 3)
+    assert [i.url for i in visible] == [
+        'https://example.com/dl3',
+        'https://example.com/dl2',
+        'https://example.com/dl1',
+    ]
+
+
+def test_manager_readding_existing_item_moves_to_top():
+    mgr = DownloadManager()
+    mgr.add_item('https://example.com/1', state='下載中')
+    mgr.add_item('https://example.com/2', state='下載中')
+    items_before = mgr.get_items()
+    # Initially item 2 is newer than item 1
+    visible_before = _visible_window(items_before, 2)
+    assert visible_before[0].url == 'https://example.com/2'
+
+    # Adding/updating item 1 should move it to the latest position
+    mgr.add_item('https://example.com/1', state='下載中')
+    items = mgr.get_items()
+    assert items[-1].url == 'https://example.com/1'
+    visible = _visible_window(items, 2)
+    assert visible[0].url == 'https://example.com/1'
+
+
+def test_download_row_retry_and_close_layout():
+    import customtkinter as ctk
+    root = ctk.CTk()
+    root.withdraw()
+    try:
+        app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+        app._dl_scroll = ctk.CTkFrame(root)
+        app._dl_scroll.pack()
+        app._dlmgr = DownloadManager()
+        app._dest_var = types.SimpleNamespace(get=lambda: r'C:\Downloads')
+        app._STATE_COLORS = gui_modern.ModernApp._STATE_COLORS
+        app._STATE_BACKGROUNDS = gui_modern.ModernApp._STATE_BACKGROUNDS
+
+        item = DownloadItem('https://example.com/fail', state='未完成')
+        w = app._build_dl_row(item)
+        root.update()
+
+        # Retry button should be packed inside actions frame to the left of close
+        assert w['retry_visible'] is True
+        assert w['retry_btn'].master == w['actions']
+        assert w['remove_btn'].master == w['actions']
+
+        # Transition to completed/no error -> retry should hide
+        item.state = '已下載'
+        item.error = ''
+        app._update_dl_row(w, item)
+        root.update()
+        assert w['retry_visible'] is False
+    finally:
+        root.destroy()
+
+
+def test_default_theme_is_dark(tmp_path, monkeypatch):
+    path = tmp_path / 'ui_prefs_empty.json'
+    monkeypatch.setattr(config, '_ui_prefs_path', lambda: str(path))
+    assert config.get_theme() == 'dark'
+
+
+def test_theme_mode_helpers_in_modern_app():
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._theme_mode = 'dark'
+    assert app._theme_display_name('dark') == 'Dark Theme'
+    assert app._theme_display_name('light') == 'Light Theme'
+    assert app._theme_display_name('system') == 'System Theme'
+

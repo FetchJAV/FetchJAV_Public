@@ -12,7 +12,7 @@ headers = {
 MIRRORS = {
     'missav': ['missav.ai', 'missav.ws', 'missav123.com', 'missav.live'],
     'jable':  ['jable.tv', 'fs1.app'],
-    'supjav': ['supjav.com'],
+    'supjav': ['supjav.com', 'supjav.net', 'supjav.org'],
 }
 
 
@@ -94,13 +94,13 @@ def get_theme():
         mode = mode.strip().lower()
         if mode in {'system', 'light', 'dark'}:
             return mode
-    return 'system'
+    return 'dark'
 
 
 def set_theme(mode):
     mode = (mode or '').strip().lower()
     if mode not in {'system', 'light', 'dark'}:
-        mode = 'system'
+        mode = 'dark'
     try:
         with _prefs_lock:
             prefs = _load_prefs()

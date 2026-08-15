@@ -7,7 +7,7 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import re
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from subtitle.cache import SubtitleCache
 from subtitle.models import OnlineSubtitleSearchResult, SubtitleSourceType, SubtitleState, SubtitleTrack
@@ -60,9 +60,14 @@ def search_online_subtitles(
     query: str,
     language: Optional[str] = None,
     providers: Optional[List[SubtitleProvider]] = None,
-    provider_name: Optional[str] = None
+    provider_name: Optional[str] = None,
+    on_result: Optional[Callable[[List[OnlineSubtitleSearchResult]], None]] = None
 ) -> List[OnlineSubtitleSearchResult]:
-    """Search online subtitle providers concurrently for matching subtitles with query expansion."""
+    """Search online subtitle providers concurrently for matching subtitles with query expansion.
+
+    ``on_result`` (if given) is invoked as each provider finishes, receiving its result
+    batch, so callers can display results progressively instead of waiting for all providers.
+    """
     if provider_name and provider_name.lower() not in ('all', 'all providers', ''):
         providers_to_use = [get_provider_by_name(provider_name)]
     else:
@@ -89,6 +94,8 @@ def search_online_subtitles(
             try:
                 sub_list = future.result()
                 if sub_list:
+                    if on_result is not None:
+                        on_result(list(sub_list))
                     for sub in sub_list:
                         key = (sub.provider, sub.download_url, sub.title)
                         if key not in seen_keys:

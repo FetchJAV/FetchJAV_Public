@@ -450,3 +450,212 @@ def dedupe_video_candidates(videos: list[dict], preference: str):
             decisions.append((video, existing_video, code or url))
 
     return kept, decisions
+
+
+# ── Subtitle-language outline badges on preview cards ────────────────
+SUBTITLE_BADGE_LANG_FILES = ('ja', 'en', 'zh-TW', 'zh-CN', 'zh', 'ko')
+SUBTITLE_BADGE_ORDER = ('EN', 'JA', 'CH', 'KO')
+SUBTITLE_BADGE_COLORS = {
+    'EN': '#42A5F5',
+    'JA': '#EF5350',
+    'CH': '#66BB6A',
+    'ZH': '#66BB6A',
+    'KO': '#AB47BC',
+}
+
+
+def badge_langs_from_label(label: str) -> tuple[str, ...]:
+    """Map a subtitle language label/code to display badge codes ('EN', 'JA', 'CH', 'KO')."""
+    s = str(label or '').strip()
+    if not s:
+        return ()
+    low = s.casefold()
+
+    # Handle language codes and translation pairs (e.g., 'ja-en', 'zh-TW', 'zh-CN')
+    if re.fullmatch(r'[a-z]{2,3}-[a-z]{2,3}', low):
+        parts = low.split('-')
+        target = parts[-1]
+        if target in ('en', 'eng'):
+            return ('EN',)
+        if target in ('zh', 'cn', 'tw', 'chs', 'cht', 'zho', 'chi', 'ch'):
+            return ('CH',)
+        if target in ('ja', 'jp', 'jpn'):
+            return ('JA',)
+        if target in ('ko', 'kor'):
+            return ('KO',)
+
+    tokens = [t for t in re.split(r'[^a-z0-9\u4e00-\u9fff\u3040-\u30ff]+', low) if t]
+    found = set()
+    for token in tokens:
+        if ('中文' in token or '繁體' in token or '簡體' in token or '简体' in token or '繁体' in token
+                or '漢語' in token or '汉语' in token or '普通话' in token or '中字' in token
+                or '国语' in token or '國語' in token or '汉化' in token or '漢化' in token):
+            found.add('CH')
+            continue
+        if ('日本語' in token or '日语' in token or '日文' in token or '日字' in token or '日語' in token):
+            found.add('JA')
+            continue
+        if ('韩文' in token or '韓文' in token or '韩语' in token or '韓國' in token or '韩国' in token):
+            found.add('KO')
+            continue
+        if token in ('en', 'eng', 'english', 'engsub') or 'english' in token or token.endswith('-en'):
+            found.add('EN')
+            continue
+        if token in ('ja', 'jp', 'jpn', 'japanese', 'jasub') or 'japan' in token or token.endswith('-ja'):
+            found.add('JA')
+            continue
+        if token in ('zh', 'zho', 'chi', 'chinese', 'chs', 'cht', 'cn', 'tw', 'ch') or 'chinese' in token or token.endswith(('-zh', '-cn', '-tw', '-ch')):
+            found.add('CH')
+            continue
+        if token in ('ko', 'kor', 'korean') or 'korean' in token or token.endswith('-ko'):
+            found.add('KO')
+            continue
+    return tuple(l for l in SUBTITLE_BADGE_ORDER if l in found)
+
+
+def detect_subtitle_langs(video: dict, dest: str = '',
+                          cache: object = None,
+                          listing_url: str = '') -> tuple[str, ...]:
+    """Return subtitle language codes ('EN', 'JA', 'CH', ...) for a video preview card.
+
+    Detects translated / subtitled videos from:
+    1. Video title heuristics (e.g. 中字, 中文字幕, 英字, 英文字幕, Eng Sub, 日文字幕, etc.)
+    2. URL slug and path patterns (e.g. -chinese-subtitle, -english-subtitle, -c, etc.)
+    3. Classified video versions and trusted subtitle evidence
+    4. Listing category URL (e.g. browsing Chinese subtitle category)
+    5. Video tags, categories, genres, or explicit subtitle metadata
+    6. Local downloaded / generated subtitle files (.srt/.vtt/.ass in dest folder)
+    7. Cached online / provider subtitle tracks in SubtitleCache
+    """
+    if not isinstance(video, dict):
+        return ()
+
+    found = set()
+
+    # 1. Check title for explicit subtitle / translation language indicators
+    title = str(video.get('title') or '')
+    if title:
+        title_l = title.casefold()
+        if (re.search(r'(?:\[|\(|【|（|\b)(?:中字|中文字幕|中文|繁中|簡中|简中|繁體中字|簡體中字|漢化|汉化|chinese\s*sub(?:title)?s?|cn\s*sub(?:title)?s?)(?:\]|\)|】|）|\b)', title, re.I)
+                or '中文字幕' in title or '中字' in title or '繁中' in title or '簡中' in title or '简中' in title
+                or 'chinese subtitle' in title_l or 'chinese sub' in title_l or 'chinese subtitles' in title_l):
+            found.add('CH')
+
+        if (re.search(r'(?:\[|\(|【|（|\b)(?:英字|英文字幕|英语字幕|英語字幕|english\s*sub(?:title)?s?|eng\s*sub(?:title)?s?|engsub)(?:\]|\)|】|）|\b)', title, re.I)
+                or '英文字幕' in title or '英字' in title or '英语字幕' in title or '英語字幕' in title
+                or 'english subtitle' in title_l or 'english sub' in title_l or 'english subtitles' in title_l
+                or 'eng sub' in title_l or 'engsub' in title_l):
+            found.add('EN')
+
+        if (re.search(r'(?:\[|\(|【|（|\b)(?:日字|日文字幕|日本語字幕|日語字幕|日语字幕|japanese\s*sub(?:title)?s?|jap\s*sub(?:title)?s?|jasub)(?:\]|\)|】|）|\b)', title, re.I)
+                or '日文字幕' in title or '日字' in title or '日本語字幕' in title or '日語字幕' in title or '日语字幕' in title
+                or 'japanese subtitle' in title_l or 'japanese sub' in title_l or 'japanese subtitles' in title_l or 'jap sub' in title_l):
+            found.add('JA')
+
+        if (re.search(r'(?:\[|\(|【|（|\b)(?:韓字|韓文字幕|韩文字幕|korean\s*sub(?:title)?s?|kor\s*sub(?:title)?s?)(?:\]|\)|】|）|\b)', title, re.I)
+                or '韓文字幕' in title or '韩文字幕' in title or '韓字' in title or '韩字' in title
+                or 'korean subtitle' in title_l or 'korean sub' in title_l):
+            found.add('KO')
+
+    # 2. Check URL slug / path for subtitle indications
+    url = str(video.get('url') or '').strip()
+    if url:
+        url_l = url.casefold()
+        slug = url_slug(url)
+        path = url_l.split('?', 1)[0].rstrip('/')
+
+        if (slug.endswith(('-chinese-subtitle', '-chinese-subtitles', '-c', '_c'))
+                or '/chinese-subtitle' in url_l
+                or '/chinese-subtitles' in url_l
+                or path.endswith('-c')
+                or '-c/' in url_l
+                or '_c/' in url_l
+                or re.search(r'[-_]c(?:/|$|\?)', url_l)):
+            found.add('CH')
+
+        if (slug.endswith(('-english-subtitle', '-english-subtitles', '-e', '-eng', '_e', '_eng'))
+                or '/english-subtitle' in url_l
+                or '/english-subtitles' in url_l
+                or path.endswith(('-e', '-eng'))):
+            found.add('EN')
+
+        if (slug.endswith(('-japanese-subtitle', '-japanese-subtitles', '-ja', '_ja'))
+                or '/japanese-subtitle' in url_l
+                or '/japanese-subtitles' in url_l):
+            found.add('JA')
+
+    # 3. Check video versions & trusted subtitle evidence
+    try:
+        vers = video_versions(video)
+        if 'chinese-subtitle' in vers:
+            found.add('CH')
+        if 'english-subtitle' in vers:
+            found.add('EN')
+        if 'japanese-subtitle' in vers:
+            found.add('JA')
+    except Exception:
+        pass
+
+    try:
+        if trusted_chinese_subtitle_evidence(video):
+            found.add('CH')
+    except Exception:
+        pass
+
+    # 4. Check listing category URL
+    if listing_url:
+        lu_l = str(listing_url).casefold()
+        if 'chinese-subtitle' in lu_l or 'chinese-subtitles' in lu_l:
+            found.add('CH')
+        elif 'english-subtitle' in lu_l or 'english-subtitles' in lu_l:
+            found.add('EN')
+        elif 'japanese-subtitle' in lu_l or 'japanese-subtitles' in lu_l:
+            found.add('JA')
+
+    # 5. Check video tags, categories, genres, or explicit subtitle metadata
+    for field_name in ('tags', 'categories', 'genres', 'subtitles', 'subtitle_langs', 'sub_langs'):
+        raw_vals = video.get(field_name)
+        if isinstance(raw_vals, (list, tuple, set)):
+            for val in raw_vals:
+                found.update(badge_langs_from_label(str(val)))
+        elif isinstance(raw_vals, str) and raw_vals:
+            found.update(badge_langs_from_label(raw_vals))
+
+    # 6. Check local downloaded / generated subtitle files
+    try:
+        code = video_code(video)
+    except Exception:
+        code = ''
+
+    if code:
+        import os
+        try:
+            dest_dir = os.path.abspath(dest or 'download')
+            for lang in SUBTITLE_BADGE_LANG_FILES:
+                if (os.path.isfile(os.path.join(dest_dir, f'{code}.{lang}.srt'))
+                        or os.path.isfile(os.path.join(dest_dir, f'{code}.{lang}.vtt'))
+                        or os.path.isfile(os.path.join(dest_dir, f'{code}.{lang}.ass'))):
+                    found.update(badge_langs_from_label(lang))
+            if os.path.isfile(os.path.join(dest_dir, f'{code}.srt')):
+                if not found:
+                    found.add('CH')
+        except Exception:
+            pass
+
+        # 7. SubtitleCache lookup
+        if cache is not None or len(found) < len(SUBTITLE_BADGE_ORDER):
+            try:
+                sub_cache = cache
+                if sub_cache is None:
+                    from subtitle_domain import SubtitleCache
+                    sub_cache = SubtitleCache()
+                for item in sub_cache.list_cached_subtitles(code):
+                    meta = item.get('metadata') or {}
+                    inner = meta.get('metadata') or {}
+                    language = inner.get('language') or meta.get('language') or ''
+                    label = language or str(item.get('lang_code') or '')
+                    found.update(badge_langs_from_label(label))
+            except Exception:
+                pass
+
+    return tuple(l for l in SUBTITLE_BADGE_ORDER if l in found)

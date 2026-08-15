@@ -138,25 +138,22 @@ def _arm_faulthandler():
 
 def _show_dialog(tb):
     path = _log_path()
-    title = f"{T('app_brand_1')} — Crash / 錯誤記錄"
+    title = f"{T('app_brand_1')} — {T('crash_title')}"
 
+    crash_intro = T('crash_intro')
+    crash_instruction = T('crash_instruction')
     msg_for_box = (
-        "程式發生了未預期的錯誤，已建立當機記錄檔：\n"
+        f"{crash_intro}\n"
         f"{path}\n\n"
-        "請將此檔案的內容，連同問題描述，一起貼到 GitHub issue 回報，感謝！\n\n"
-        "An unexpected error occurred. A crash log has been created at:\n"
-        f"{path}\n\n"
-        "Please paste the contents of this file, along with a description of the problem, to a GitHub issue. Thank you!\n\n"
+        f"{crash_instruction}\n\n"
         f"{tb[-2500:]}"
     )
 
     msg_for_mb = (
-        "JableTV 發生未預期的錯誤，已寫入記錄檔：\n%s\n\n"
-        "請把這個檔案（或下面的訊息）貼到 GitHub issue，謝謝！\n"
-        "An unexpected error occurred. A log was saved to:\n%s\n\n"
-        "Please attach this file (or the text below) to a GitHub issue.\n\n"
-        "%s"
-    ) % (path, path, tb[-1000:])
+        f"{crash_intro}\n{path}\n\n"
+        f"{crash_instruction}\n\n"
+        f"{tb[-1000:]}"
+    )
 
     # Prefer a native Win32 MessageBox: it's process-global and safe even when a
     # Tk root already exists / its mainloop has died (building a 2nd tk.Tk() in a
@@ -191,25 +188,21 @@ def _show_dialog(tb):
             header.pack(fill="x", padx=20, pady=(20, 10))
             ctk.CTkLabel(header, text=title, font=(ui_font(), 18, 'bold'), text_color=TEXT_PRI).pack(anchor='w')
 
-            intro_text_zh = "程式發生了未預期的錯誤，已建立當機記錄檔："
-            intro_text_en = "An unexpected error occurred. A crash log has been created at:"
-            ctk.CTkLabel(main_frame, text=f"{intro_text_zh}\n{intro_text_en}", font=(ui_font(), 12), text_color=TEXT_SEC, justify='left').pack(anchor='w', padx=20, pady=(0, 5))
+            ctk.CTkLabel(main_frame, text=crash_intro, font=(ui_font(), 12), text_color=TEXT_SEC, justify='left').pack(anchor='w', padx=20, pady=(0, 5))
 
             path_entry = ctk.CTkEntry(main_frame, fg_color=BG_INPUT, border_color=BORDER, border_width=1, text_color=TEXT_PRI)
             path_entry.insert(0, path)
             path_entry.configure(state='readonly')
             path_entry.pack(fill='x', padx=20, pady=0, ipady=4)
 
-            instruction_zh = "請將此檔案的內容，連同問題描述，一起貼到 GitHub issue 回報，感謝！"
-            instruction_en = "Please paste the contents of this file, along with a description of the problem, to a GitHub issue. Thank you!"
-            ctk.CTkLabel(main_frame, text=f"{instruction_zh}\n{instruction_en}", font=(ui_font(), 12), text_color=TEXT_SEC, justify='left').pack(anchor='w', padx=20, pady=(10, 5))
+            ctk.CTkLabel(main_frame, text=crash_instruction, font=(ui_font(), 12), text_color=TEXT_SEC, justify='left').pack(anchor='w', padx=20, pady=(10, 5))
 
             textbox = ctk.CTkTextbox(main_frame, wrap="word", fg_color=BG_INPUT, text_color=TEXT_SEC, border_color=BORDER, border_width=1, corner_radius=CONTROL_RADIUS, font=('Consolas', 10))
             textbox.pack(fill="both", expand=True, padx=20, pady=(0, 15))
             textbox.insert("1.0", tb[-2500:])
             textbox.configure(state="disabled")
 
-            button = ctk.CTkButton(main_frame, text="關閉", command=win.destroy, fg_color=ACCENT, hover_color=ACCENT_HOVER, corner_radius=CONTROL_RADIUS, height=36, font=(ui_font(), 12, 'bold'))
+            button = ctk.CTkButton(main_frame, text=T('crash_close'), command=win.destroy, fg_color=ACCENT, hover_color=ACCENT_HOVER, corner_radius=CONTROL_RADIUS, height=36, font=(ui_font(), 12, 'bold'))
             button.pack(pady=(0, 20))
 
             win.mainloop()
@@ -228,7 +221,7 @@ def _show_dialog(tb):
         box.insert("1.0", msg_for_box)
         box.configure(state='disabled')
         box.pack(fill="both", expand=True, padx=12, pady=8)
-        tk.Button(win, text="關閉", command=win.destroy).pack(pady=(0, 12))
+        tk.Button(win, text=T('crash_close'), command=win.destroy).pack(pady=(0, 12))
         win.mainloop()
     except Exception:
         pass

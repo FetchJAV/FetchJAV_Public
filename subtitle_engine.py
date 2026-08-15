@@ -132,7 +132,7 @@ REAZONSPEECH_PACK_NAME = (
     f'Jable_reazonspeech_asr_v{REAZONSPEECH_PACK_VERSION}.zip')
 REAZONSPEECH_PACK_RELEASE_TAG = 'v2.5.39'
 REAZONSPEECH_PACK_URL = (
-    'https://github.com/Alos21750/FetchJAV/'
+    'https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/'
     f'releases/download/{REAZONSPEECH_PACK_RELEASE_TAG}/'
     f'{REAZONSPEECH_PACK_NAME}'
 )
@@ -258,7 +258,7 @@ TRANSLATION_PACK_VERSION = '1'
 TRANSLATION_PACK_NAME = f'Jable_local_translation_v{TRANSLATION_PACK_VERSION}.zip'
 TRANSLATION_PACK_RELEASE_TAG = 'v2.5.34'
 TRANSLATION_PACK_URL = (
-    'https://github.com/Alos21750/FetchJAV/'
+    'https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/'
     f'releases/download/{TRANSLATION_PACK_RELEASE_TAG}/'
     f'{TRANSLATION_PACK_NAME}'
 )
@@ -311,6 +311,15 @@ ASR_PIPELINE_VERSION = 'whisper-cpp-v1.9.1-external-vad-context-batch-v4'
 SUBTITLE_PROVENANCE_SCHEMA = 1
 SUBTITLE_PROVENANCE_KIND = 'jable_subtitle_provenance'
 MAX_SUBTITLE_PROVENANCE_BYTES = 64 * 1024
+
+# Component downloads occasionally hit GitHub/HuggingFace rate limiting
+# (HTTP 429/403) or transient host errors (5xx).  Retry a bounded number of
+# times with backoff and resume a partial `.part` file instead of starting
+# over, so flaky networks self-heal.  Non-transient errors (for example a
+# 404 because an asset URL changed) fail immediately with the URL and status.
+SUBTITLE_DOWNLOAD_MAX_ATTEMPTS = 3
+SUBTITLE_DOWNLOAD_TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+SUBTITLE_DOWNLOAD_BACKOFF_MAX_SECONDS = 15.0
 
 _RECOGNITION_DEFAULT = object()
 
@@ -680,6 +689,93 @@ def _is_verified(
     return True
 
 
+def _download_backoff_seconds(attempts: int) -> float:
+    """Exponential backoff for a completed attempt count, capped."""
+    try:
+        return min(2.0 ** max(1, int(attempts)), SUBTITLE_DOWNLOAD_BACKOFF_MAX_SECONDS)
+    except (TypeError, ValueError, OverflowError):
+        return 1.0
+
+
+def _retry_after_seconds(response) -> float:
+    """Honor a server Retry-After header for rate-limited downloads."""
+    if response is None:
+        return 0.0
+    raw = response.headers.get('Retry-After')
+    if raw is None:
+        return 0.0
+    try:
+        seconds = float(raw)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    if not math.isfinite(seconds) or seconds < 0.0:
+        return 0.0
+    return min(seconds, SUBTITLE_DOWNLOAD_BACKOFF_MAX_SECONDS)
+
+
+def _download_failure_message(
+        url: str, exc: Exception, status: Optional[int] = None) -> str:
+    if status:
+        detail = f'HTTP {status}'
+    elif isinstance(exc, requests.HTTPError) and exc.response is not None:
+        detail = f'HTTP {exc.response.status_code}'
+    else:
+        detail = type(exc).__name__
+    return f'Unable to download subtitle component from {url}: {detail}'
+
+
+def _download_component_attempt(
+        session: requests.Session, url: str, part: str, expected_size: int,
+        stage: str, progress_callback: Optional[ProgressCallback],
+        cancel_check: Optional[CancelCheck],
+        request_kwargs: dict) -> None:
+    """Stream one component download, resuming a partial `.part` file.
+
+    GitHub and HuggingFace asset hosts both honor HTTP Range requests, so a
+    failed attempt does not discard the bytes already received.  A server that
+    ignores the Range header (HTTP 200) simply restarts from zero.
+    """
+    resume_bytes = 0
+    try:
+        if os.path.isfile(part):
+            candidate = os.path.getsize(part)
+            if 0 < candidate < expected_size:
+                resume_bytes = candidate
+    except OSError:
+        resume_bytes = 0
+    headers = {}
+    if resume_bytes:
+        headers['Range'] = f'bytes={resume_bytes}-'
+    # A short per-read timeout keeps cancellation responsive when a model host
+    # stalls; the timeout resets whenever another chunk arrives.
+    with session.get(
+            url, stream=True, timeout=(15, 15),
+            headers=headers, **request_kwargs) as response:
+        response.raise_for_status()
+        if response.status_code == 206 and resume_bytes:
+            received = resume_bytes
+            mode = 'ab'
+            total = expected_size
+        else:
+            received = 0
+            mode = 'wb'
+            total = int(response.headers.get('Content-Length') or expected_size)
+        with open(part, mode) as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                _check_cancel(cancel_check)
+                if not chunk:
+                    continue
+                if received + len(chunk) > expected_size:
+                    raise SubtitleError(
+                        'Downloaded subtitle component is larger than expected')
+                handle.write(chunk)
+                received += len(chunk)
+                pct = int(received * 100 / total) if total > 0 else None
+                _notify(progress_callback, stage, min(100, pct) if pct is not None else None)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
 def _download_verified(url: str, destination: str, expected_size: int,
                        expected_sha256: str, stage: str,
                        progress_callback: Optional[ProgressCallback],
@@ -691,13 +787,30 @@ def _download_verified(url: str, destination: str, expected_size: int,
     part = destination + '.part'
     try:
         os.makedirs(os.path.dirname(destination), exist_ok=True)
-        try:
-            os.remove(part)
-        except FileNotFoundError:
-            pass
     except OSError as exc:
         raise SubtitleError(
             'Subtitle component storage is unavailable') from exc
+    try:
+        partial_size = os.path.getsize(part)
+    except OSError:
+        partial_size = 0
+    if partial_size:
+        if partial_size == expected_size and _is_verified(
+                part, expected_size, expected_sha256, cancel_check):
+            try:
+                os.replace(part, destination)
+            except OSError as exc:
+                raise SubtitleError(
+                    'Subtitle component storage is unavailable') from exc
+            _verified_paths.pop(os.path.abspath(part), None)
+            _verified_paths.pop(os.path.abspath(destination), None)
+            return destination
+        if partial_size >= expected_size:
+            try:
+                os.remove(part)
+            except OSError as exc:
+                raise SubtitleError(
+                    'Subtitle component storage is unavailable') from exc
     try:
         free_bytes = shutil.disk_usage(
             os.path.dirname(destination)).free
@@ -711,26 +824,35 @@ def _download_verified(url: str, destination: str, expected_size: int,
     session = _session()
     try:
         kwargs = config.proxy_request_kwargs()
-        # A short per-read timeout keeps cancellation responsive when a model
-        # host stalls; the timeout resets whenever another chunk arrives.
-        with session.get(url, stream=True, timeout=(15, 15), **kwargs) as response:
-            response.raise_for_status()
-            received = 0
-            total = int(response.headers.get('Content-Length') or expected_size)
-            with open(part, 'wb') as handle:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    _check_cancel(cancel_check)
-                    if not chunk:
-                        continue
-                    if received + len(chunk) > expected_size:
-                        raise SubtitleError(
-                            'Downloaded subtitle component is larger than expected')
-                    handle.write(chunk)
-                    received += len(chunk)
-                    pct = int(received * 100 / total) if total > 0 else None
-                    _notify(progress_callback, stage, min(100, pct) if pct is not None else None)
-                handle.flush()
-                os.fsync(handle.fileno())
+        attempts = 0
+        while True:
+            attempts += 1
+            _check_cancel(cancel_check)
+            try:
+                _download_component_attempt(
+                    session, url, part, expected_size, stage,
+                    progress_callback, cancel_check, kwargs)
+                break
+            except SubtitleCancelled:
+                raise
+            except SubtitleError:
+                raise
+            except requests.HTTPError as exc:
+                status = getattr(exc.response, 'status_code', None)
+                if (
+                        status in SUBTITLE_DOWNLOAD_TRANSIENT_STATUSES
+                        and attempts < SUBTITLE_DOWNLOAD_MAX_ATTEMPTS):
+                    time.sleep(max(
+                        _download_backoff_seconds(attempts),
+                        _retry_after_seconds(exc.response)))
+                    continue
+                raise SubtitleError(
+                    _download_failure_message(url, exc, status)) from exc
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                if attempts >= SUBTITLE_DOWNLOAD_MAX_ATTEMPTS:
+                    raise SubtitleError(
+                        _download_failure_message(url, exc)) from exc
+                time.sleep(_download_backoff_seconds(attempts))
         if not _is_verified(
                 part, expected_size, expected_sha256, cancel_check):
             raise SubtitleError('Downloaded subtitle component failed integrity verification')
@@ -742,17 +864,14 @@ def _download_verified(url: str, destination: str, expected_size: int,
             raise SubtitleError('Installed subtitle component failed integrity verification')
         return destination
     except SubtitleCancelled:
-        raise
-    except SubtitleError:
-        raise
-    except Exception as exc:
-        raise SubtitleError(f'Unable to download subtitle component: {type(exc).__name__}') from exc
-    finally:
-        session.close()
+        # Do not keep a partial on disk after the user cancels.
         try:
             os.remove(part)
-        except FileNotFoundError:
+        except OSError:
             pass
+        raise
+    finally:
+        session.close()
 
 
 def _find_whisper_exe(folder: str) -> Optional[str]:
@@ -4887,6 +5006,34 @@ def _generation_slot(cancel_check: Optional[CancelCheck]):
     finally:
         if acquired:
             _generation_lock.release()
+
+
+def prefetch_subtitle_models(
+        progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
+        include_translation: Optional[bool] = None) -> dict:
+    """Download the local subtitle models into the shared cache ahead of time.
+
+    Prepares the whisper.cpp runtime, the speech model for the currently
+    selected recognition quality, the VAD model, and (unless the selected
+    translation provider is an API) the local translation model.  Every prepare
+    step is integrity-checked and already-cached files are reused without
+    re-downloading.  Safe to call at any time; it does not block subtitle
+    generation beyond the shared cache locks used during first-time downloads.
+    Returns a summary mapping stage names to prepared paths.
+    """
+    if include_translation is None:
+        include_translation = not bool(
+            getattr(_selected_translation_profile(), 'uses_api', False))
+    summary: dict = {}
+    exe, model, vad_model = _prepare_runtime(progress_callback, cancel_check)
+    summary['runtime'] = exe
+    summary['model'] = model
+    summary['vad_model'] = vad_model
+    if include_translation:
+        summary['translation'] = _prepare_translation_runtime(
+            progress_callback, cancel_check)
+    return summary
 
 
 def generate_subtitles(video_path: str, mode,

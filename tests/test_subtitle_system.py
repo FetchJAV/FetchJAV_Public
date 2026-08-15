@@ -122,6 +122,34 @@ class TestSubtitleCache(unittest.TestCase):
         self.assertEqual(len(cached_items), 1)
         self.assertEqual(cached_items[0]['filename'], "ABC-123.en.srt")
 
+    def test_cache_stats_and_clear_all(self):
+        stats_empty = self.cache.get_cache_stats()
+        self.assertEqual(stats_empty['file_count'], 0)
+        self.assertEqual(stats_empty['total_bytes'], 0)
+
+        other_tmp = tempfile.mkdtemp()
+        try:
+            sub_file = os.path.join(other_tmp, "source2.srt")
+            with open(sub_file, "w", encoding="utf-8") as f:
+                f.write("1\n00:00:01,000 --> 00:00:02,000\nHello World\n")
+
+            self.cache.save_subtitle_file("DEF-456", "zh", "DEF-456.zh.srt", sub_file)
+            self.cache.save_subtitle_file("GHI-789", "ja", "GHI-789.ja.srt", sub_file)
+
+            stats = self.cache.get_cache_stats()
+            self.assertEqual(stats['file_count'], 2)
+            self.assertGreater(stats['total_bytes'], 0)
+
+            removed = self.cache.clear_all()
+            self.assertEqual(removed, 2)
+
+            stats_after = self.cache.get_cache_stats()
+            self.assertEqual(stats_after['file_count'], 0)
+            self.assertEqual(stats_after['total_bytes'], 0)
+            self.assertEqual(self.cache.list_cached_subtitles("DEF-456"), [])
+        finally:
+            shutil.rmtree(other_tmp, ignore_errors=True)
+
 
 class TestSubtitleCatProvider(unittest.TestCase):
     @patch("subtitle.providers.subtitlecat.requests.Session.get")

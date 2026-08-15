@@ -1,5 +1,9 @@
+import requests
+
 from video_preview import (
     PreviewProxyServer,
+    SegmentCache,
+    extract_hls_segments_and_keys,
     resolve_preview_source,
     rewrite_hls_playlist,
 )
@@ -27,6 +31,68 @@ https://cdn.example.com/seg-2.ts
     assert 'local:https://media.example.com/path/variant/720p.m3u8' in rewritten
     assert 'local:https://media.example.com/path/seg-1.ts' in rewritten
     assert 'local:https://cdn.example.com/seg-2.ts' in rewritten
+
+
+def test_extract_hls_segments_and_keys():
+    source = """#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="keys/main.key"
+#EXT-X-MAP:URI='init.mp4'
+#EXT-X-STREAM-INF:BANDWIDTH=1200000
+variant/720p.m3u8
+#EXTINF:6.0,
+seg-1.ts
+https://cdn.example.com/seg-2.ts
+"""
+    segments, keys = extract_hls_segments_and_keys(source, 'https://media.example.com/path/master.m3u8')
+    assert len(keys) == 2
+    assert keys[0] == 'https://media.example.com/path/keys/main.key'
+    assert keys[1] == 'https://media.example.com/path/init.mp4'
+    assert len(segments) == 2
+    assert segments[0] == 'https://media.example.com/path/seg-1.ts'
+    assert segments[1] == 'https://cdn.example.com/seg-2.ts'
+
+
+def test_segment_cache_lru_eviction():
+    cache = SegmentCache(max_bytes=100)
+    data1 = b'A' * 40
+    data2 = b'B' * 40
+    data3 = b'C' * 40
+
+    cache.put('https://cdn.example/seg1.ts', {}, data1, 'video/MP2T')
+    cache.put('https://cdn.example/seg2.ts', {}, data2, 'video/MP2T')
+    assert cache.has('https://cdn.example/seg1.ts')
+    assert cache.has('https://cdn.example/seg2.ts')
+
+    # Adding seg3 should evict seg1 (oldest) because total exceeds 100
+    cache.put('https://cdn.example/seg3.ts', {}, data3, 'video/MP2T')
+    assert not cache.has('https://cdn.example/seg1.ts')
+    assert cache.has('https://cdn.example/seg2.ts')
+    assert cache.has('https://cdn.example/seg3.ts')
+
+
+def test_preview_proxy_serves_cached_media_and_supports_range():
+    proxy = PreviewProxyServer()
+    try:
+        token = proxy.register({})
+        seg_url = 'https://cdn.example/sample.ts'
+        fake_data = b'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        proxy._cache.put(seg_url, {}, fake_data, 'video/MP2T')
+
+        proxied = proxy.proxied_url(token, seg_url)
+
+        # 1. Full content request
+        resp = requests.get(proxied, timeout=5)
+        assert resp.status_code == 200
+        assert resp.content == fake_data
+        assert resp.headers.get('Content-Type') == 'video/MP2T'
+
+        # 2. Byte-range request
+        resp_range = requests.get(proxied, headers={'Range': 'bytes=0-9'}, timeout=5)
+        assert resp_range.status_code == 206
+        assert resp_range.content == b'0123456789'
+        assert resp_range.headers.get('Content-Range') == f'bytes 0-9/{len(fake_data)}'
+    finally:
+        proxy.stop()
 
 
 def test_resolve_preview_source_prefers_hls_metadata_from_downloader_job():

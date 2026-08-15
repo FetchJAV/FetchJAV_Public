@@ -5,10 +5,14 @@ import pytest
 from video_identity import (
     DEFAULT_VERSION_PREFERENCE,
     MAX_SOURCE_SUBTITLE_EVIDENCE_TEXT,
+    SUBTITLE_BADGE_COLORS,
+    SUBTITLE_BADGE_ORDER,
     TRUSTED_CHINESE_SUBTITLE_EVIDENCE,
     VALID_VERSION_PREFERENCES,
+    badge_langs_from_label,
     canonical_code,
     dedupe_video_candidates,
+    detect_subtitle_langs,
     normalize_source_subtitle_evidence,
     normalize_version_preference,
     site_from_url,
@@ -380,3 +384,91 @@ def test_legacy_uncensored_value_is_normalized():
         'chinese-subtitle', 'uncensored', 'standard',
         'english-subtitle', 'reducing-mosaic',
     }
+
+
+@pytest.mark.parametrize(('label', 'expected'), [
+    ('zh', ('CH',)),
+    ('zh-TW', ('CH',)),
+    ('zh-CN', ('CH',)),
+    ('繁體中文', ('CH',)),
+    ('簡體中文', ('CH',)),
+    ('中文字幕', ('CH',)),
+    ('en', ('EN',)),
+    ('English', ('EN',)),
+    ('eng', ('EN',)),
+    ('ja-en', ('EN',)),
+    ('ja', ('JA',)),
+    ('Japanese', ('JA',)),
+    ('日本語', ('JA',)),
+    ('ko', ('KO',)),
+    ('Korean', ('KO',)),
+    ('韓文', ('KO',)),
+    ('', ()),
+    ('unknown', ()),
+])
+def test_badge_langs_from_label(label, expected):
+    assert badge_langs_from_label(label) == expected
+
+
+def test_subtitle_badge_colors_and_order():
+    assert 'EN' in SUBTITLE_BADGE_COLORS
+    assert 'JA' in SUBTITLE_BADGE_COLORS
+    assert 'CH' in SUBTITLE_BADGE_COLORS
+    assert 'KO' in SUBTITLE_BADGE_COLORS
+    assert 'EN' in SUBTITLE_BADGE_ORDER
+    assert 'JA' in SUBTITLE_BADGE_ORDER
+    assert 'CH' in SUBTITLE_BADGE_ORDER
+
+
+@pytest.mark.parametrize(('video', 'expected'), [
+    # Chinese subtitle in title
+    ({'title': 'IPZZ-905 [中文字幕]', 'url': 'https://jable.tv/videos/ipzz-905/'}, ('CH',)),
+    ({'title': 'SNOS-223 【中字】', 'url': 'https://jable.tv/videos/snos-223/'}, ('CH',)),
+    ({'title': 'MIDE-123 (中字)', 'url': 'https://jable.tv/videos/mide-123/'}, ('CH',)),
+    ({'title': 'IPX-456 繁中', 'url': 'https://jable.tv/videos/ipx-456/'}, ('CH',)),
+    ({'title': 'IPX-789 [Chinese Subtitles]', 'url': 'https://supjav.com/789.html'}, ('CH',)),
+    # Chinese subtitle in URL
+    ({'title': 'mimk-284', 'url': 'https://missav.ai/cn/mimk-284-chinese-subtitle'}, ('CH',)),
+    ({'title': 'ipzz-905', 'url': 'https://jable.tv/videos/ipzz-905-c/'}, ('CH',)),
+    ({'title': 'ipzz-905', 'url': 'https://missav.ai/ipzz-905-c'}, ('CH',)),
+    # English subtitle in title
+    ({'title': 'STARS-123 [Eng Sub]', 'url': 'https://jable.tv/videos/stars-123/'}, ('EN',)),
+    ({'title': 'IPX-555 【英字】', 'url': 'https://jable.tv/videos/ipx-555/'}, ('EN',)),
+    ({'title': 'MIDE-999 English Subtitles', 'url': 'https://supjav.com/999.html'}, ('EN',)),
+    # English subtitle in URL
+    ({'title': 'mide-789', 'url': 'https://missav.ai/mide-789-english-subtitle'}, ('EN',)),
+    # Japanese subtitle in title
+    ({'title': 'FC2-PPV-1234567 [日本語字幕]', 'url': 'https://supjav.com/123.html'}, ('JA',)),
+    ({'title': 'FC2-PPV-1234568 日文字幕', 'url': 'https://supjav.com/124.html'}, ('JA',)),
+    # Korean subtitle
+    ({'title': 'FC2-PPV-1234569 [韓文字幕]', 'url': 'https://supjav.com/125.html'}, ('KO',)),
+    # Unsubtitled video
+    ({'title': 'SSIS-123 Regular Video', 'url': 'https://jable.tv/videos/ssis-123/'}, ()),
+])
+def test_detect_subtitle_langs_online_signals(video, expected):
+    assert detect_subtitle_langs(video) == expected
+
+
+def test_detect_subtitle_langs_local_files(tmp_path):
+    video = {'title': 'SSIS-888 Sample', 'url': 'https://jable.tv/videos/ssis-888/'}
+    assert detect_subtitle_langs(video, dest=str(tmp_path)) == ()
+
+    # Create local Chinese srt
+    (tmp_path / 'ssis-888.zh-TW.srt').write_text('1\n00:00:00 --> 00:00:01\nTest', encoding='utf-8')
+    assert detect_subtitle_langs(video, dest=str(tmp_path)) == ('CH',)
+
+    # Create local English srt as well
+    (tmp_path / 'ssis-888.en.srt').write_text('1\n00:00:00 --> 00:00:01\nTest', encoding='utf-8')
+    assert detect_subtitle_langs(video, dest=str(tmp_path)) == ('EN', 'CH')
+
+
+def test_detect_subtitle_langs_cached_subtitles():
+    class FakeCache:
+        def list_cached_subtitles(self, code):
+            if code == 'ssis-777':
+                return [{'lang_code': 'ja', 'metadata': {'language': 'Japanese'}}]
+            return []
+
+    video = {'title': 'SSIS-777 Sample', 'url': 'https://jable.tv/videos/ssis-777/'}
+    assert detect_subtitle_langs(video, cache=FakeCache()) == ('JA',)
+

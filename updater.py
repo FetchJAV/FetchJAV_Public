@@ -12,7 +12,7 @@ import requests
 import config
 
 
-REPO = "Alos21750/FetchJAV"
+REPO = "Alos21750/JableTV-MissAV-Downloader-GUI-2026"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 
@@ -54,7 +54,7 @@ def is_newer(latest, current):
 def check_latest(timeout=10):
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "FetchJAV-Updater",
+        "User-Agent": "JableTV-Updater",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     try:

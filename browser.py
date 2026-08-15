@@ -10,6 +10,7 @@ from PIL import ImageTk, Image
 from config import headers
 import config
 from ssl_util import SharedSSLAdapter
+from video_identity import detect_subtitle_langs, SUBTITLE_BADGE_COLORS
 from M3U8Sites.SiteJableTV import JableTVBrowser
 from M3U8Sites.SiteMissAV import MissAVBrowser
 
@@ -94,6 +95,28 @@ class VideoCard(tk.Frame):
         else:
             self._dur_lbl = None
 
+        # Subtitle-language outline badges — bottom-left of thumbnail
+        sub_badges = []
+        try:
+            sub_langs = detect_subtitle_langs(self._data)
+        except Exception:
+            sub_langs = ()
+        if sub_langs:
+            _bx = 4
+            for _lang in sub_langs:
+                _color = SUBTITLE_BADGE_COLORS.get(_lang, '#90A4AE')
+                _s_lbl = tk.Label(self._thumb_frame, text=_lang,
+                                  bg='#0a0a18', fg=_color,
+                                  highlightthickness=1,
+                                  highlightbackground=_color,
+                                  highlightcolor=_color,
+                                  font=('Consolas', 8, 'bold'),
+                                  padx=3, pady=1)
+                _s_lbl.place(relx=0, rely=1.0, anchor='sw', x=_bx, y=-4)
+                _s_lbl.lift()
+                sub_badges.append(_s_lbl)
+                _bx += 28
+
         # Title
         self._title_lbl = tk.Label(
             self, text=_truncate(self._data.get('title', ''), 76),
@@ -103,7 +126,7 @@ class VideoCard(tk.Frame):
         self._title_lbl.pack(fill='x')
 
         # Bind clicks to self and all visible children
-        for w in (self, self._thumb_frame, self._thumb_lbl, self._title_lbl):
+        for w in (self, self._thumb_frame, self._thumb_lbl, self._title_lbl, *sub_badges):
             w.bind('<Button-1>', self._click)
             w.bind('<Double-Button-1>', self._dblclick)
             w.bind('<Enter>', self._enter)
@@ -489,6 +512,11 @@ class BrowsePanel(tk.Frame):
             arrow.configure(text='▸')
             self._sb_expanded[group_name] = False
         else:
+            for other_name, (other_frame, other_arrow) in self._sb_tag_frames.items():
+                if other_name != group_name and self._sb_expanded.get(other_name, False):
+                    other_frame.pack_forget()
+                    other_arrow.configure(text='▸')
+                    self._sb_expanded[other_name] = False
             # Pack after the header (which is sibling inside same container)
             frame.pack(fill='x', after=frame.master.winfo_children()[0])
             arrow.configure(text='▾')

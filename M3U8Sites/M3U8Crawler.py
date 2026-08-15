@@ -140,55 +140,69 @@ def fetch_with_mirrors(scraper, url, site_key, validate, timeout=15, headers_fac
     if not order:
         order = list(mirrors)
     saw_real = False
-    for host in order:
-        target = _swap_host(url, host)
-        base_hdrs = dict(headers_factory(host) or {}) if headers_factory else {}
-        ov = config.get_cf_override(host)
-        trials = []
-        if ov:
-            h2 = dict(base_hdrs)
-            if ov.get('ua'):
-                h2['User-Agent'] = ov['ua']
-            ck = {'cf_clearance': ov['cookie']} if ov.get('cookie') else None
-            trials.append((h2, ck))
-        trials.append((base_hdrs, None))
-        resp = None
-        for hdrs, cookies in trials:
-            r = None
-            for attempt in range(2):                  # 1 retry on transport error only
-                try:
-                    r = scraper.get(
-                        target, timeout=timeout, headers=hdrs or {}, cookies=cookies,
-                        **config.proxy_request_kwargs())
-                    break
-                except Exception:
-                    r = None
-            if r is None:
-                continue
-            if _is_cf_interstitial(r):
+    for pass_num in range(2):
+        for host in order:
+            target = _swap_host(url, host)
+            base_hdrs = dict(headers_factory(host) or {}) if headers_factory else {}
+            ov = config.get_cf_override(host)
+            trials = []
+            if ov:
+                h2 = dict(base_hdrs)
+                if ov.get('ua'):
+                    h2['User-Agent'] = ov['ua']
+                ck = {'cf_clearance': ov['cookie']} if ov.get('cookie') else None
+                trials.append((h2, ck))
+            trials.append((base_hdrs, None))
+            resp = None
+            for hdrs, cookies in trials:
+                r = None
+                for attempt in range(2):                  # 1 retry on transport error only
+                    try:
+                        r = scraper.get(
+                            target, timeout=timeout, headers=hdrs or {}, cookies=cookies,
+                            **config.proxy_request_kwargs())
+                        break
+                    except Exception:
+                        r = None
+                if r is None:
+                    continue
+                if _is_cf_interstitial(r):
+                    resp = r
+                    continue
                 resp = r
+                break
+            if resp is None:
                 continue
-            resp = r
-            break
-        if resp is None:
-            continue
-        if _is_cf_interstitial(resp):
-            continue
-        try:
-            final_host = urlsplit(str(resp.url)).netloc
-        except Exception:
-            final_host = host
-        if final_host and final_host not in mirrors:  # redirected off the allowlist -> distrust
-            continue
-        saw_real = True
-        try:
-            ok = validate(resp)
-        except Exception:
-            ok = False
-        if ok:
-            with _active_host_lock:
-                _active_host[site_key] = host
-            return resp, host, 'ok'
+            if _is_cf_interstitial(resp):
+                continue
+            try:
+                final_host = urlsplit(str(resp.url)).netloc
+            except Exception:
+                final_host = host
+            if final_host and final_host not in mirrors:  # redirected off the allowlist -> distrust
+                continue
+            saw_real = True
+            try:
+                ok = validate(resp)
+            except Exception:
+                ok = False
+            if ok:
+                with _active_host_lock:
+                    _active_host[site_key] = host
+                return resp, host, 'ok'
+
+        if pass_num == 0:
+            had_cookies = False
+            try:
+                if hasattr(scraper, 'cookies') and bool(getattr(scraper, 'cookies', None)):
+                    scraper.cookies.clear()
+                    had_cookies = True
+            except Exception:
+                pass
+            if not had_cookies:
+                break
+            time.sleep(0.2)
+
     return None, None, ('empty' if saw_real else 'blocked')
 
 # ── Global speed limiter (token bucket) ──────────────────────────

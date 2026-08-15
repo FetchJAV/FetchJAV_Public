@@ -279,7 +279,7 @@ class DownloadQueue(ttk.Treeview):
     def add_item(self, url, name='', state=''):
         iid = self._iid(url)
         if not self.exists(iid):
-            self.insert('', 'end', iid=iid,
+            self.insert('', 0, iid=iid,
                         values=(state, name or url.rstrip('/').split('/')[-1],
                                 '', '', url),
                         tags=(state,))
@@ -301,6 +301,11 @@ class DownloadQueue(ttk.Treeview):
         if name:
             self.set(iid, '名稱', name)
         self.item(iid, tags=(state,))
+        if state == '下載中':
+            try:
+                self.move(iid, '', 0)
+            except Exception:
+                pass
         self.modified = True
 
     def exists_url(self, url):
@@ -480,6 +485,20 @@ class MainWindow(tk.Tk):
         except tk.TclError:
             self.geometry('1340x880')
         _cfg_ttk(self)
+
+        _root_dir = os.path.dirname(os.path.abspath(__file__))
+        _img_dir = os.path.join(_root_dir, 'img')
+        _ico_candidates = [
+            os.path.join(_root_dir, 'logo.ico'),
+            r'C:\Users\workd\Downloads\logo.ico',
+            os.path.join(_img_dir, 'favicon.ico'),
+        ]
+        _ico_path = next((p for p in _ico_candidates if os.path.isfile(p)), '')
+        if _ico_path:
+            try:
+                self.iconbitmap(_ico_path)
+            except Exception:
+                pass
 
         self._dest = dest
         self._url = url
@@ -743,7 +762,7 @@ class MainWindow(tk.Tk):
         tk.Label(grp2, text='v1.0.0  •  僅供學習與研究用途',
                  bg=BG_SECTION, fg=TEXT_SEC, font=FONT_SM).pack(anchor='w', pady=(4, 0))
         tk.Label(grp2,
-                 text='GitHub: Alos21750/FetchJAV',
+                 text='GitHub: Alos21750/JableTV-MissAV-Downloader-GUI-2026',
                  bg=BG_SECTION, fg=ACCENT2, font=FONT_SM).pack(anchor='w', pady=(4, 0))
 
     # ── Browse → Download bridges ────────────────────────────────────────

@@ -1406,3 +1406,93 @@ def test_existing_subtitle_rejects_empty_and_malformed_sidecars(tmp_path):
 
     sidecar.write_text(_sample_srt('Valid subtitle.'), encoding='utf-8')
     assert subtitles._existing(str(sidecar))
+
+
+def test_prefetch_subtitle_models_prepares_runtime_and_local_translation(
+        monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        subtitles, '_prepare_runtime',
+        lambda _cb, _cc: calls.append('runtime') or (
+            'exe.exe', 'model.bin', 'vad.bin'))
+    monkeypatch.setattr(
+        subtitles, '_prepare_translation_runtime',
+        lambda _cb, _cc: calls.append('translation') or {
+            'translate.exe': 'C:/cache/translate.exe'})
+    monkeypatch.setattr(
+        subtitles, '_selected_translation_profile',
+        lambda: SimpleNamespace(uses_api=False))
+
+    summary = subtitles.prefetch_subtitle_models()
+
+    assert summary == {
+        'runtime': 'exe.exe',
+        'model': 'model.bin',
+        'vad_model': 'vad.bin',
+        'translation': {'translate.exe': 'C:/cache/translate.exe'},
+    }
+    assert calls == ['runtime', 'translation']
+
+
+def test_prefetch_subtitle_models_skips_translation_for_api_provider(
+        monkeypatch):
+    monkeypatch.setattr(
+        subtitles, '_prepare_runtime',
+        lambda _cb, _cc: ('exe.exe', 'model.bin', 'vad.bin'))
+    monkeypatch.setattr(
+        subtitles, '_selected_translation_profile',
+        lambda: SimpleNamespace(uses_api=True))
+    monkeypatch.setattr(
+        subtitles, '_prepare_translation_runtime',
+        lambda *_args, **_kwargs:
+            pytest.fail('API translation must not prepare local translation'))
+
+    summary = subtitles.prefetch_subtitle_models()
+
+    assert summary == {
+        'runtime': 'exe.exe',
+        'model': 'model.bin',
+        'vad_model': 'vad.bin',
+    }
+
+
+def test_prefetch_subtitle_models_include_translation_overrides_api(
+        monkeypatch):
+    monkeypatch.setattr(
+        subtitles, '_prepare_runtime',
+        lambda _cb, _cc: ('exe.exe', 'model.bin', 'vad.bin'))
+    monkeypatch.setattr(
+        subtitles, '_prepare_translation_runtime',
+        lambda _cb, _cc: {'translate.exe': 'C:/cache/translate.exe'})
+
+    summary = subtitles.prefetch_subtitle_models(include_translation=True)
+
+    assert summary == {
+        'runtime': 'exe.exe',
+        'model': 'model.bin',
+        'vad_model': 'vad.bin',
+        'translation': {'translate.exe': 'C:/cache/translate.exe'},
+    }
+
+
+def test_prefetch_subtitle_models_forwards_progress_and_cancel(monkeypatch):
+    progress = []
+
+    def fake_runtime(callback, cancel_check):
+        assert callable(callback)
+        assert callable(cancel_check)
+        callback('model', 42)
+        assert cancel_check() is False
+        return ('exe.exe', 'model.bin', 'vad.bin')
+
+    monkeypatch.setattr(subtitles, '_prepare_runtime', fake_runtime)
+    monkeypatch.setattr(
+        subtitles, '_selected_translation_profile',
+        lambda: SimpleNamespace(uses_api=True))
+
+    subtitles.prefetch_subtitle_models(
+        progress_callback=lambda stage, percent:
+            progress.append((stage, percent)),
+        cancel_check=lambda: False)
+
+    assert progress == [('model', 42)]

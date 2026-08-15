@@ -4,7 +4,7 @@
 
 ### 官方資產
 
-只從本專案的 [GitHub Releases](https://github.com/Alos21750/FetchJAV/releases) 下載。自 v2.5.38 起，Windows Release 提供可驗證的程式資產；v2.5.39 起另包含預設 CPU 字幕辨識包：
+只從本專案的 [GitHub Releases](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases) 下載。自 v2.5.38 起，Windows Release 提供可驗證的程式資產；v2.5.39 起另包含預設 CPU 字幕辨識包：
 
 - `JableTV_Modern.exe`
 - `Jable_smalltool.exe`
@@ -22,13 +22,13 @@ Get-FileHash .\Jable_smalltool.exe -Algorithm SHA256
 
 ```powershell
 gh attestation verify .\Jable_smalltool.exe `
-  -R Alos21750/FetchJAV
+  -R Alos21750/JableTV-MissAV-Downloader-GUI-2026
 
 gh attestation verify .\Jable_smalltool_portable.zip `
-  -R Alos21750/FetchJAV
+  -R Alos21750/JableTV-MissAV-Downloader-GUI-2026
 
 gh attestation verify .\Jable_reazonspeech_asr_v1.zip `
-  -R Alos21750/FetchJAV
+  -R Alos21750/JableTV-MissAV-Downloader-GUI-2026
 ```
 
 雜湊只能證明檔案內容是否一致；GitHub attestation 只能證明建置來源。兩者都不等於防毒判定，也不能單獨證明程式安全。
@@ -63,7 +63,7 @@ gh attestation verify .\Jable_reazonspeech_asr_v1.zip `
 
 ### Official assets
 
-Download only from this project's [GitHub Releases](https://github.com/Alos21750/FetchJAV/releases). Starting with v2.5.38, Windows releases provide verifiable application assets; v2.5.39 also includes the default CPU speech-recognition pack:
+Download only from this project's [GitHub Releases](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026/releases). Starting with v2.5.38, Windows releases provide verifiable application assets; v2.5.39 also includes the default CPU speech-recognition pack:
 
 - `JableTV_Modern.exe`
 - `Jable_smalltool.exe`
@@ -81,13 +81,13 @@ If GitHub CLI is installed, verify that the release asset was produced by this r
 
 ```powershell
 gh attestation verify .\Jable_smalltool.exe `
-  -R Alos21750/FetchJAV
+  -R Alos21750/JableTV-MissAV-Downloader-GUI-2026
 
 gh attestation verify .\Jable_smalltool_portable.zip `
-  -R Alos21750/FetchJAV
+  -R Alos21750/JableTV-MissAV-Downloader-GUI-2026
 
 gh attestation verify .\Jable_reazonspeech_asr_v1.zip `
-  -R Alos21750/FetchJAV
+  -R Alos21750/JableTV-MissAV-Downloader-GUI-2026
 ```
 
 A checksum proves byte identity. A GitHub attestation proves build provenance. Neither is an antivirus verdict or, by itself, proof that software is safe.

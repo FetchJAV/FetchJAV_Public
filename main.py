@@ -146,12 +146,17 @@ def _run_translation_diagnostic_if_requested():
 if __name__ == '__main__':
     _run_translation_diagnostic_if_requested()
 
-# Enable DPI awareness BEFORE any Tk/GUI imports
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)   # Per-monitor V2
-except Exception:
+# Enable DPI awareness and set taskbar AppUserModelID BEFORE any Tk/GUI imports
+if sys.platform == 'win32':
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)   # Per-monitor V2
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('FetchJAV.App')
     except Exception:
         pass
 

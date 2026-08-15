@@ -201,12 +201,18 @@ def main():
     refresh_d = "M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
     bulb_d = "M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"
 
-    # Refresh icon: Dark theme (white), Light theme (dark grey)
-    img_ref_dark = render_svg(refresh_d, stroke_color=(240, 240, 245, 255), stroke_width=1.8)
+    # Refresh icon: Dull default & Bright hover variants
+    img_ref_dark = render_svg(refresh_d, stroke_color=(155, 150, 145, 255), stroke_width=1.8)
     img_ref_dark.save(os.path.join(img_dir, 'icon_refresh_dark.png'))
 
-    img_ref_light = render_svg(refresh_d, stroke_color=(30, 30, 40, 255), stroke_width=1.8)
+    img_ref_light = render_svg(refresh_d, stroke_color=(130, 125, 120, 255), stroke_width=1.8)
     img_ref_light.save(os.path.join(img_dir, 'icon_refresh_light.png'))
+
+    img_ref_hover_dark = render_svg(refresh_d, stroke_color=(255, 255, 255, 255), stroke_width=1.8)
+    img_ref_hover_dark.save(os.path.join(img_dir, 'icon_refresh_hover_dark.png'))
+
+    img_ref_hover_light = render_svg(refresh_d, stroke_color=(20, 20, 25, 255), stroke_width=1.8)
+    img_ref_hover_light.save(os.path.join(img_dir, 'icon_refresh_hover_light.png'))
 
     # Bulb OFF (Dark Mode): Dim neutral silver/grey outline, unlit
     img_bulb_off = render_svg(bulb_d, stroke_color=(180, 185, 195, 255), stroke_width=1.8)

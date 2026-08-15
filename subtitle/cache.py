@@ -131,8 +131,13 @@ class SubtitleCache:
         return target_path
 
     def list_cached_subtitles(self, video_identifier: str) -> List[dict]:
-        """List all cached subtitle files for a video code/identifier."""
-        v_dir = self.get_video_cache_dir(video_identifier)
+        """List all cached subtitle files for a video code/identifier.
+
+        Read-only: does not create the video cache directory (unlike
+        :meth:`get_video_cache_dir`), so it is safe to call per video while
+        rendering browse grids.
+        """
+        v_dir = os.path.join(self.root_dir, self._video_key(video_identifier))
         results = []
         if not os.path.isdir(v_dir):
             return results
@@ -159,3 +164,77 @@ class SubtitleCache:
                     })
 
         return results
+
+    def cached_languages(self, video_identifier: str) -> List[str]:
+        """Language codes with at least one cached subtitle file for a video.
+
+        Read-only: never creates the video cache directory (unlike
+        :meth:`list_cached_subtitles`), so it is safe to call per video while
+        rendering browse grids.
+        """
+        v_dir = os.path.join(self.root_dir, self._video_key(video_identifier))
+        if not os.path.isdir(v_dir):
+            return []
+        langs = []
+        for entry in os.scandir(v_dir):
+            if not entry.is_dir():
+                continue
+            has_file = False
+            for root, _, files in os.walk(entry.path):
+                if any(f.lower().endswith(('.srt', '.vtt', '.ass', '.ssa'))
+                       for f in files):
+                    has_file = True
+                    break
+            if has_file:
+                langs.append(entry.name)
+        return sorted(langs)
+
+    def get_cache_stats(self) -> dict:
+        """Return count of cached subtitle files and total bytes used on disk."""
+        file_count = 0
+        total_bytes = 0
+        if not os.path.isdir(self.root_dir):
+            return {'file_count': 0, 'total_bytes': 0}
+        try:
+            for root, _, files in os.walk(self.root_dir):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        total_bytes += os.path.getsize(fp)
+                        if f.lower().endswith(('.srt', '.vtt', '.ass', '.ssa')):
+                            file_count += 1
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+        return {'file_count': file_count, 'total_bytes': total_bytes}
+
+    def clear_all(self) -> int:
+        """Remove all cached subtitle files and directories.
+        Returns the number of subtitle files deleted."""
+        removed_count = 0
+        if not os.path.isdir(self.root_dir):
+            return 0
+        try:
+            for entry in os.listdir(self.root_dir):
+                item_path = os.path.join(self.root_dir, entry)
+                try:
+                    if os.path.isfile(item_path) or os.path.islink(item_path):
+                        if item_path.lower().endswith(('.srt', '.vtt', '.ass', '.ssa')):
+                            removed_count += 1
+                        os.remove(item_path)
+                    elif os.path.isdir(item_path):
+                        for root, _, files in os.walk(item_path):
+                            for f in files:
+                                if f.lower().endswith(('.srt', '.vtt', '.ass', '.ssa')):
+                                    removed_count += 1
+                        shutil.rmtree(item_path, ignore_errors=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            os.makedirs(self.root_dir, exist_ok=True)
+        except Exception:
+            pass
+        return removed_count

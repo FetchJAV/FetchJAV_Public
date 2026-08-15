@@ -38,6 +38,35 @@ def _make_scraper():
     return cloudscraper.create_scraper(browser=request_headers, delay=10)
 
 
+def _fetch_server_gateway(scraper, server_token):
+    token = str(server_token or '').strip()
+    if not token:
+        return None
+    reversed_token = token[::-1]
+    urls_to_try = [
+        f'https://lk1.supremejav.com/supjav.php?c={reversed_token}',
+        f'https://lk2.supremejav.com/supjav.php?c={reversed_token}',
+        f'https://supremejav.com/supjav.php?c={reversed_token}',
+        f'https://lk1.supremejav.com/supjav.php?l={token}',
+        f'https://lk2.supremejav.com/supjav.php?l={token}',
+        f'https://supremejav.com/supjav.php?l={token}',
+    ]
+    for target_url in urls_to_try:
+        try:
+            resp = scraper.get(
+                target_url,
+                headers={'Referer': 'https://supjav.com/'},
+                timeout=20,
+                allow_redirects=True,
+                **config.proxy_request_kwargs(),
+            )
+            if resp is not None and getattr(resp, 'status_code', 0) == 200 and resp.text:
+                return resp
+        except Exception:
+            continue
+    return None
+
+
 def _extract_tv_link(html_text):
     soup = BeautifulSoup(html_text, 'html.parser')
     for a in soup.select('a[data-link]'):
@@ -112,20 +141,33 @@ def _streamtape_direct_url(html_text):
 
 
 def _extract_packed_m3u8(html_text):
-    """Extract an HLS URL from an fc2stream/FST Dean-Edwards packed script."""
+    """Extract an HLS URL from an fc2stream/FST Dean-Edwards packed script or direct embed."""
+    if not html_text:
+        return None
+    # 1. Direct regex for m3u8 in the body
+    m_direct = re.search(r"https?://[^'\"\\;\s\n\r]+\.m3u8[^'\"\\;\s\n\r]*", html_text)
+    if m_direct:
+        return m_direct.group(0)
+
+    # 2. Check packed scripts (eval(function(p,a,c,k,e,d)))
     for script in re.findall(r'<script[^>]*>(.*?)</script>', html_text, re.DOTALL):
-        if 'eval(function' not in script or 'm3u8' not in script:
-            continue
-        unpacked = _unpack_js_eval(script)
-        if not unpacked:
-            continue
-        match = re.search(
-            r"https?://[^'\"\\;\s]+\.m3u8[^'\"\\;\s]*",
-            unpacked,
-        )
-        if match:
-            return match.group(0)
-    return None
+        if 'eval(function' in script or 'p,a,c,k,e,d' in script or 'p,a,c,k,e,r' in script:
+            unpacked = _unpack_js_eval(script)
+            if unpacked:
+                match = re.search(
+                    r"https?://[^'\"\\;\s\n\r]+\.m3u8[^'\"\\;\s\n\r]*",
+                    unpacked,
+                )
+                if match:
+                    return match.group(0)
+
+    # 3. Check for sources / file: / src: definitions
+    for m in re.finditer(r'(?:file|src|source|urlPlay)[\s:=]+[\'"](https?://[^\'"\s]+)[\'"]', html_text, re.I):
+        u = m.group(1)
+        if '.m3u8' in u:
+            return u
+
+    return _extract_m3u8(html_text)
 
 
 def _content_range(value):
@@ -213,24 +255,21 @@ class SiteSupJav(M3U8Crawler):
 
             m3u8url = None
             m3u8_headers = None
+
             # 1) FST: downloadable HLS with real 480p/720p/1080p variants (#31).
-            if 'FST' in servers:
+            fst_key = next((k for k in servers if k.upper() in ('FST', 'FAST', 'FPLAYER', 'FC2STREAM')), None)
+            if fst_key:
                 try:
-                    fst = scraper.get(
-                        SUPREMEJAV.format(servers['FST'][::-1]),
-                        headers={'Referer': 'https://supjav.com/'},
-                        timeout=25,
-                        allow_redirects=True,
-                        **config.proxy_request_kwargs(),
-                    )
-                    m3u8url = _extract_packed_m3u8(fst.text)
-                    if m3u8url:
-                        parts = urlsplit(str(getattr(fst, 'url', '') or ''))
-                        origin = (f'{parts.scheme}://{parts.netloc}'
-                                  if parts.scheme and parts.netloc else '')
-                        m3u8_headers = {'Referer': str(fst.url)}
-                        if origin:
-                            m3u8_headers['Origin'] = origin
+                    fst = _fetch_server_gateway(scraper, servers[fst_key])
+                    if fst is not None:
+                        m3u8url = _extract_packed_m3u8(fst.text)
+                        if m3u8url:
+                            parts = urlsplit(str(getattr(fst, 'url', '') or ''))
+                            origin = (f'{parts.scheme}://{parts.netloc}'
+                                      if parts.scheme and parts.netloc else '')
+                            m3u8_headers = {'Referer': str(fst.url)}
+                            if origin:
+                                m3u8_headers['Origin'] = origin
                 except MirrorsBlockedError:
                     raise
                 except Exception:
@@ -239,32 +278,32 @@ class SiteSupJav(M3U8Crawler):
 
             # 2) Streamtape (ST): progressive MP4 fallback. Resolve it even when FST
             #    works so an HLS failure can downgrade without rescanning the page.
-            if 'ST' in servers:
+            st_key = next((k for k in servers if k.upper() in ('ST', 'STREAMTAPE', 'STPLAYER')), None)
+            if st_key:
                 try:
-                    emb = scraper.get(SUPREMEJAV.format(servers['ST'][::-1]),
-                                      headers={'Referer': 'https://supjav.com/'},
-                                      timeout=25, allow_redirects=True,
-                                      **config.proxy_request_kwargs())
-                    direct = _streamtape_direct_url(emb.text)
-                    if direct:
-                        self._direct_url = direct
-                        self._direct_referer = str(getattr(emb, 'url', '') or 'https://streamtape.com/')
+                    emb = _fetch_server_gateway(scraper, servers[st_key])
+                    if emb is not None:
+                        direct = _streamtape_direct_url(emb.text)
+                        if direct:
+                            self._direct_url = direct
+                            self._direct_referer = str(getattr(emb, 'url', '') or 'https://streamtape.com/')
                 except MirrorsBlockedError:
                     raise
                 except Exception:
                     pass
+
             # 3) TV: last HLS fallback (its Google-backed segments often return 429).
             #    Keep it for videos SupJav has not migrated to either FST or ST.
-            if not m3u8url and not self._direct_url and 'TV' in servers:
+            tv_key = next((k for k in servers if k.upper() in ('TV', 'FAV', 'FAVJAV')), None)
+            if not m3u8url and not self._direct_url and tv_key:
                 try:
-                    r2 = scraper.get(SUPREMEJAV.format(servers['TV'][::-1]),
-                                     headers={'Referer': 'https://supjav.com/'}, timeout=20,
-                                     **config.proxy_request_kwargs())
-                    if getattr(r2, 'status_code', 0) in (403, 429, 503):
-                        raise MirrorsBlockedError(_BLOCKED_MSG)
-                    m3u8url = _extract_m3u8(r2.text)
-                    if m3u8url:
-                        m3u8_headers = {'Referer': 'https://supjav.com/'}
+                    r2 = _fetch_server_gateway(scraper, servers[tv_key])
+                    if r2 is not None:
+                        if getattr(r2, 'status_code', 0) in (403, 429, 503):
+                            raise MirrorsBlockedError(_BLOCKED_MSG)
+                        m3u8url = _extract_m3u8(r2.text)
+                        if m3u8url:
+                            m3u8_headers = {'Referer': 'https://supjav.com/'}
                 except MirrorsBlockedError:
                     raise
                 except Exception:
@@ -279,6 +318,9 @@ class SiteSupJav(M3U8Crawler):
         self._imageUrl = None
         self._m3u8url = m3u8url
         self._extra_headers = m3u8_headers or {'Referer': 'https://supjav.com/'}
+
+    def _m3u8_headers(self):
+        return getattr(self, '_extra_headers', None) or {'Referer': 'https://supjav.com/'}
 
     def is_url_vaildate(self):
         # The base gate is `True if self._m3u8url` — but a Streamtape source resolves to

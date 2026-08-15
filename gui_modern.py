@@ -13,7 +13,7 @@ import webbrowser
 import threading
 import concurrent.futures
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, font as tkfont, messagebox
 from typing import Optional
 from urllib.parse import urlsplit
 
@@ -95,6 +95,7 @@ from subtitle_engine import (
     generate_subtitles,
     normalize_recognition_quality,
     normalize_subtitle_mode,
+    prefetch_subtitle_models,
 )
 from translation_settings_ui import (
     ModalOverlay,
@@ -103,11 +104,18 @@ from translation_settings_ui import (
     translation_provider_summary,
 )
 from video_identity import (
+    SUBTITLE_BADGE_COLORS,
+    SUBTITLE_BADGE_LANG_FILES,
+    SUBTITLE_BADGE_ORDER,
+    badge_langs_from_label,
+    detect_subtitle_langs,
     normalize_source_subtitle_evidence,
     trusted_chinese_subtitle_evidence,
     video_code,
+    video_versions,
 )
 from subtitle import SubtitleManager, SubtitleTrack, SubtitleSourceType
+from subtitle.cache import SubtitleCache
 from video_preview import PreviewProxyServer, PreviewSource, resolve_preview_source
 from metadata_fetcher import fetch_video_metadata
 from ui_theme import (
@@ -173,6 +181,79 @@ SITES = {
     'SupJav': {'browser': SupJavBrowser},
 }
 
+_ALL_SITE_KEYS = tuple(SITES.keys())
+
+
+# English "popular tags" group shown at the top of the JableTV sidebar.
+# Only slugs that actually exist on jable.tv are listed (others return 404).
+JABLE_EN_TAG_GROUPS = [
+    ('Big Tits', 'big-tits'),
+    ('Blowjob', 'blowjob'),
+    ('Creampie', 'creampie'),
+    ('Married Woman', 'wife'),
+    ('Shaved', 'hairless-pussy'),
+    ('Titty Fuck', 'tit-wank'),
+]
+
+# MissAV homepage header mega-menu (English locale), mirrored into the sidebar
+# above the Categories group. Each entry is (header_label, [(name, url)]).
+MISS_AV_HEADER_NAV = [
+    ('English subtitle', [
+        ('English subtitle', 'https://missav.ai/dm23/en/english-subtitle'),
+    ]),
+    ('Watch JAV', [
+        ('Recent update', 'https://missav.ai/dm539/en/new'),
+        ('New Releases', 'https://missav.ai/dm635/en/release'),
+        ('Uncensored leak', 'https://missav.ai/dm817/en/uncensored-leak'),
+        ('Actress list', 'https://missav.ai/en/actresses'),
+        ('Actress ranking', 'https://missav.ai/en/actresses/ranking'),
+        ('Genre', 'https://missav.ai/en/genres'),
+        ('Maker', 'https://missav.ai/en/makers'),
+        ('VR', 'https://missav.ai/en/genres/VR'),
+        ('Most viewed today', 'https://missav.ai/dm301/en/today-hot'),
+        ('Most viewed by week', 'https://missav.ai/dm170/en/weekly-hot'),
+        ('Most viewed by month', 'https://missav.ai/dm273/en/monthly-hot'),
+    ]),
+    ('Amateur', [
+        ('SIRO', 'https://missav.ai/dm36/en/siro'),
+        ('LUXU', 'https://missav.ai/dm34/en/luxu'),
+        ('GANA', 'https://missav.ai/dm34/en/gana'),
+        ('PRESTIGE PREMIUM', 'https://missav.ai/dm1004/en/maan'),
+        ('S-CUTE', 'https://missav.ai/dm38/en/scute'),
+        ('ARA', 'https://missav.ai/dm34/en/ara'),
+    ]),
+    ('Uncensored', [
+        ('Uncensored leak', 'https://missav.ai/dm817/en/uncensored-leak'),
+        ('FC2', 'https://missav.ai/dm597/en/fc2'),
+        ('HEYZO', 'https://missav.ai/dm2208642/en/heyzo'),
+        ('Tokyo Hot', 'https://missav.ai/dm42/en/tokyohot'),
+        ('1pondo', 'https://missav.ai/dm5199603/en/1pondo'),
+        ('Caribbeancom', 'https://missav.ai/dm7704788/en/caribbeancom'),
+        ('Caribbeancompr', 'https://missav.ai/dm91887/en/caribbeancompr'),
+        ('10musume', 'https://missav.ai/dm7208981/en/10musume'),
+        ('pacopacomama', 'https://missav.ai/dm3600557/en/pacopacomama'),
+        ('Gachinco', 'https://missav.ai/dm150/en/gachinco'),
+        ('XXX-AV', 'https://missav.ai/dm42/en/xxxav'),
+        ('Married Slash', 'https://missav.ai/dm37/en/marriedslash'),
+        ('Naughty 4610', 'https://missav.ai/dm33/en/naughty4610'),
+        ('Naughty 0930', 'https://missav.ai/dm37/en/naughty0930'),
+    ]),
+    ('Asia AV', [
+        ('Madou', 'https://missav.ai/dm63/en/madou'),
+        ('TWAV', 'https://missav.ai/dm31/en/twav'),
+        ('Furuke', 'https://missav.ai/dm15/en/furuke'),
+        ('Korean Live', 'https://missav.ai/en/klive'),
+        ('Chinese Live', 'https://missav.ai/en/clive'),
+    ]),
+    ('My collection', [
+        ('Upgrade VIP', 'https://missav.ai/en/vip'),
+        ('My video collection', 'https://missav.ai/en/saved'),
+        ('My playlist', 'https://missav.ai/en/playlists'),
+        ('My actress collection', 'https://missav.ai/en/saved/actresses'),
+        ('Watch history', 'https://missav.ai/en/history'),
+    ]),
+]
+
 
 _STATE_PRIORITY = {
     '下載中': 0,
@@ -201,10 +282,18 @@ _SUBTITLE_STATE_BY_STAGE = {
 }
 
 
+# ── Subtitle-language outline badges on browse cards ─────────────────
+_SUBTITLE_BADGE_LANG_FILES = SUBTITLE_BADGE_LANG_FILES
+_SUBTITLE_BADGE_ORDER = SUBTITLE_BADGE_ORDER
+_SUBTITLE_BADGE_COLORS = SUBTITLE_BADGE_COLORS
+_badge_langs_from_label = badge_langs_from_label
+_available_subtitle_langs = detect_subtitle_langs
+
+
 def _visible_window(items, cap):
     ordered = sorted(
         enumerate(items),
-        key=lambda pair: (_STATE_PRIORITY.get(pair[1].state, 8), pair[0]))
+        key=lambda pair: (_STATE_PRIORITY.get(pair[1].state, 8), -pair[0]))
     return [item for _, item in ordered[:cap]]
 
 
@@ -302,7 +391,11 @@ class DownloadManager:
                 self._items[url] = DownloadItem(
                     url, name, state, dest, source_subtitle_evidence)
             else:
-                item = self._items[url]
+                item = self._items.pop(url)
+                if name:
+                    item.name = name
+                if state:
+                    item.state = state
                 if dest:
                     item.dest = dest
                 evidence = set(item.source_subtitle_evidence)
@@ -313,6 +406,7 @@ class DownloadManager:
                 }))
                 item.source_subtitle_evidence = (
                     normalize_source_subtitle_evidence(evidence))
+                self._items[url] = item
             return self._items[url]
 
     def get_items(self) -> list[DownloadItem]:
@@ -349,6 +443,7 @@ class DownloadManager:
             item = self._items.get(url)
             if item:
                 item.dest = dest or item.dest
+                self._items[url] = self._items.pop(url)
             else:
                 self._items[url] = DownloadItem(url, dest=dest)
                 item = self._items[url]
@@ -494,6 +589,8 @@ class DownloadManager:
                     self._set_state(candidate.url, '已取消')
                     continue
                 self._active[candidate.url] = candidate
+                if candidate.url in self._items:
+                    self._items[candidate.url] = self._items.pop(candidate.url)
                 task = candidate
                 break
         if task is not None:
@@ -1073,6 +1170,22 @@ def _fetch_thumbnail(url: str, site_key: str = '') -> Optional[Image.Image]:
     return None
 
 
+def _fit_card_button_font(text, max_width, base_size=10, bold=False):
+    """Return the largest font tuple (family, size[, 'bold']) whose text fits
+    inside max_width px, so inline card buttons never clip when the window is
+    resized small. Falls back to the smallest readable size (8)."""
+    family = ui_font()
+    weights = ('bold',) if bold else ()
+    avail = max(10, (max_width or 0) - 6)
+    for size in (base_size, base_size - 1, base_size - 2, 8):
+        try:
+            if tkfont.Font(family=family, size=size).measure(text) <= avail:
+                return (family, size) + weights
+        except Exception:
+            continue
+    return (family, 8) + weights
+
+
 def _fetch_actress_portrait(url: str) -> Optional[Image.Image]:
     """Download an actress portrait from a Cloudflare-protected CDN (e.g.
     cdn.javmiku.com) using the browser-impersonating scraper; cached per-URL."""
@@ -1155,6 +1268,151 @@ class SiteSelectorBar(ctk.CTkFrame):
         self.set_selected(site, trigger_command=False)
 
 
+class ToolTip:
+    """Lightweight, themed floating tooltip that displays full text on hover."""
+    def __init__(self, widget, text_func, delay_ms: int = 250, max_width: int = 400, only_if_truncated: bool = True):
+        self.widget = widget
+        self.text_func = text_func if callable(text_func) else (lambda: text_func)
+        self.delay_ms = delay_ms
+        self.max_width = max_width
+        self.only_if_truncated = only_if_truncated
+        self._tip_window = None
+        self._after_id = None
+
+        try:
+            self.widget.bind('<Enter>', self._on_enter, add='+')
+            self.widget.bind('<Leave>', self._on_leave, add='+')
+            self.widget.bind('<ButtonPress>', self._on_leave, add='+')
+            self.widget.bind('<Destroy>', self._on_destroy, add='+')
+        except Exception:
+            pass
+
+    def _on_enter(self, event=None):
+        self._cancel()
+        try:
+            self._after_id = self.widget.after(self.delay_ms, self._show)
+        except Exception:
+            pass
+
+    def _on_leave(self, event=None):
+        self._cancel()
+        self._hide()
+
+    def _on_destroy(self, event=None):
+        self._cancel()
+        self._hide()
+
+    def _cancel(self):
+        if self._after_id:
+            try:
+                self.widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
+    def _show(self):
+        self._after_id = None
+        try:
+            if not self.widget.winfo_exists():
+                return
+        except Exception:
+            return
+
+        text = self.text_func()
+        if not text:
+            return
+
+        if self.only_if_truncated:
+            try:
+                widget_text = ''
+                if hasattr(self.widget, 'cget'):
+                    try:
+                        widget_text = self.widget.cget('text')
+                    except Exception:
+                        pass
+                if not widget_text and hasattr(self.widget, '_text'):
+                    widget_text = getattr(self.widget, '_text', '')
+
+                widget_text = str(widget_text or '').strip()
+                full_text = str(text or '').strip()
+
+                # If the widget already shows the entire text completely without truncation, skip tooltip
+                if widget_text and widget_text == full_text and not widget_text.endswith('…') and not widget_text.endswith('...'):
+                    return
+            except Exception:
+                pass
+
+        self._hide()
+
+        try:
+            x = self.widget.winfo_pointerx() + 12
+            y = self.widget.winfo_pointery() + 18
+            screen_w = self.widget.winfo_screenwidth()
+            screen_h = self.widget.winfo_screenheight()
+
+            mode = 'dark'
+            try:
+                mode = ctk.get_appearance_mode().lower()
+            except Exception:
+                pass
+            is_dark = (mode != 'light')
+
+            bg_color = '#181820' if is_dark else '#FFFFFF'
+            fg_color = '#F5F2EF' if is_dark else '#1B1817'
+            border_color = '#363644' if is_dark else '#CEC8C0'
+
+            tip = tk.Toplevel(self.widget)
+            self._tip_window = tip
+            tip.wm_overrideredirect(True)
+            try:
+                tip.wm_attributes('-topmost', True)
+            except Exception:
+                pass
+
+            border_frame = tk.Frame(tip, bg=border_color, padx=1, pady=1)
+            border_frame.pack(fill='both', expand=True)
+
+            inner_frame = tk.Frame(border_frame, bg=bg_color, padx=9, pady=6)
+            inner_frame.pack(fill='both', expand=True)
+
+            lbl = tk.Label(
+                inner_frame,
+                text=text,
+                justify='left',
+                bg=bg_color,
+                fg=fg_color,
+                font=(ui_font(), 10),
+                wraplength=self.max_width
+            )
+            lbl.pack()
+
+            tip.update_idletasks()
+            tip_w = tip.winfo_reqwidth()
+            tip_h = tip.winfo_reqheight()
+
+            if x + tip_w > screen_w - 12:
+                x = screen_w - tip_w - 12
+            if x < 12:
+                x = 12
+            if y + tip_h > screen_h - 12:
+                y = max(12, self.widget.winfo_pointery() - tip_h - 10)
+            if y < 12:
+                y = 12
+
+            tip.wm_geometry(f"+{x}+{y}")
+        except Exception:
+            self._hide()
+
+    def _hide(self):
+        tip = self._tip_window
+        self._tip_window = None
+        if tip:
+            try:
+                tip.destroy()
+            except Exception:
+                pass
+
+
 # ── Main App ─────────────────────────────────────────────────────────
 class ModernApp(ctk.CTk):
     def __init__(self, url: str = '', dest: str = 'download', lang: str = 'en'):
@@ -1187,19 +1445,29 @@ class ModernApp(ctk.CTk):
             except Exception:
                 pass
 
-        _img_dir = os.path.join(os.path.dirname(__file__), 'img')
-        _custom_ico = r'C:\Users\workd\Downloads\4c456089-a846-4cb5-8b18-f63ab926bd71 tr.ico'
-        _ico_path = _custom_ico if os.path.exists(_custom_ico) else os.path.join(_img_dir, 'favicon.ico')
-        _png_path = os.path.join(_img_dir, 'favicon-256x256.png')
-        if not os.path.exists(_png_path):
-            _png_path = os.path.join(_img_dir, 'apple-touch-icon.png')
+        _root_dir = os.path.dirname(os.path.abspath(__file__))
+        _img_dir = os.path.join(_root_dir, 'img')
+        _ico_candidates = [
+            os.path.join(_root_dir, 'logo.ico'),
+            r'C:\Users\workd\Downloads\logo.ico',
+            os.path.join(_img_dir, 'favicon.ico'),
+        ]
+        _ico_path = next((p for p in _ico_candidates if os.path.isfile(p)), os.path.join(_img_dir, 'favicon.ico'))
+        self._ico_path = _ico_path
+
+        _png_candidates = [
+            os.path.join(_root_dir, 'logo.png'),
+            os.path.join(_img_dir, 'favicon-256x256.png'),
+            os.path.join(_img_dir, 'apple-touch-icon.png'),
+        ]
+        _png_path = next((p for p in _png_candidates if os.path.isfile(p)), '')
 
         if os.path.exists(_ico_path):
             try:
                 self.iconbitmap(_ico_path)
             except Exception:
                 pass
-        if os.path.exists(_png_path):
+        if _png_path and os.path.exists(_png_path):
             try:
                 _app_icon = ImageTk.PhotoImage(Image.open(_png_path))
                 self.iconphoto(True, _app_icon)
@@ -1231,6 +1499,12 @@ class ModernApp(ctk.CTk):
         self._last_loaded_page: int = 1
         self._browse_blocked = False
         self._browse_empty_message = ''
+        self._search_all_mode = False       # compass toggle: search every site at once
+        self._search_all_active = False     # current grid is a multi-site search result
+        self._search_all_query = ''
+        self._compass_lbl = None
+        self._compass_icon = None
+        self._compass_icon_active = None
         self._card_widgets: dict = {}  # url -> {card, sel_btn, preview_btn}
         self._preview_gen: int = 0
         self._preview_video: Optional[dict] = None
@@ -1338,6 +1612,22 @@ class ModernApp(ctk.CTk):
                     light_image=Image.open(d_p), dark_image=Image.open(d_p),
                     size=(14, 14)
                 )
+            sub_loc_light = os.path.join(img_dir_dest, 'icon_sub_local_light.png')
+            sub_loc_dark = os.path.join(img_dir_dest, 'icon_sub_local_dark.png')
+            if os.path.exists(sub_loc_light) and os.path.exists(sub_loc_dark):
+                self._sub_local_icon = ctk.CTkImage(
+                    light_image=Image.open(sub_loc_light),
+                    dark_image=Image.open(sub_loc_dark),
+                    size=(16, 16)
+                )
+            sub_srch_light = os.path.join(img_dir_dest, 'icon_sub_search_light.png')
+            sub_srch_dark = os.path.join(img_dir_dest, 'icon_sub_search_dark.png')
+            if os.path.exists(sub_srch_light) and os.path.exists(sub_srch_dark):
+                self._sub_search_icon = ctk.CTkImage(
+                    light_image=Image.open(sub_srch_light),
+                    dark_image=Image.open(sub_srch_dark),
+                    size=(16, 16)
+                )
         except Exception:
             pass
 
@@ -1377,6 +1667,11 @@ class ModernApp(ctk.CTk):
             popup.configure(bg=bg)
             popup.resizable(False, False)
             popup.transient(self)
+            if getattr(self, '_ico_path') and os.path.exists(self._ico_path):
+                try:
+                    popup.iconbitmap(self._ico_path)
+                except Exception:
+                    pass
 
             picker_font = 'Microsoft JhengHei'   # renders all 4 native scripts
             tk.Label(popup, text=T('lang_picker_title'), bg=bg, fg=fg,
@@ -1454,7 +1749,7 @@ class ModernApp(ctk.CTk):
 
         try:
             self.after(0, _run)
-        except tk.TclError:
+        except (tk.TclError, RuntimeError, Exception):
             pass
 
     def _short_update_note(self, info):
@@ -1476,6 +1771,11 @@ class ModernApp(ctk.CTk):
             prompt.configure(fg_color=BG_CARD)
             prompt.resizable(False, False)
             prompt.transient(self)
+            if getattr(self, '_ico_path') and os.path.exists(self._ico_path):
+                try:
+                    prompt.iconbitmap(self._ico_path)
+                except Exception:
+                    pass
 
             pos_width, pos_height = 420, 220
             self.update_idletasks()
@@ -1696,9 +1996,30 @@ class ModernApp(ctk.CTk):
     def _show_update_settings(self, event=None):
         self._select_tab('settings')
 
-    # ── Build UI ─────────────────────────────────────────────────────
+    def _theme_display_name(self, mode: str) -> str:
+        mode_s = (mode or '').strip().lower()
+        if mode_s == 'system':
+            return 'System Theme'
+        elif mode_s == 'light':
+            return 'Light Theme'
+        return 'Dark Theme'
+
+    def _on_theme_select(self, choice: str):
+        choice_s = (choice or '').strip().lower()
+        if 'system' in choice_s:
+            mode = 'system'
+        elif 'light' in choice_s:
+            mode = 'light'
+        else:
+            mode = 'dark'
+        self._theme_mode = mode
+        ctk.set_appearance_mode(mode)
+        config.set_theme(mode)
+        if hasattr(self, '_theme_var') and self._theme_var:
+            self._theme_var.set(self._theme_display_name(mode))
+
     def _theme_glyph(self):
-        return {'system': '◐', 'light': '☀', 'dark': '☾'}.get(self._theme_mode, '◐')
+        return {'system': '◐', 'light': '☀', 'dark': '☾'}.get(self._theme_mode, '☾')
 
     def _get_theme_icon(self):
         return getattr(self, '_theme_icon', None)
@@ -1712,11 +2033,14 @@ class ModernApp(ctk.CTk):
         self._theme_mode = modes[(idx + 1) % len(modes)]
         ctk.set_appearance_mode(self._theme_mode)
         config.set_theme(self._theme_mode)
+        if hasattr(self, '_theme_var') and self._theme_var:
+            self._theme_var.set(self._theme_display_name(self._theme_mode))
         icon_obj = self._get_theme_icon()
-        if icon_obj:
-            self._theme_btn.configure(text="", image=icon_obj)
-        else:
-            self._theme_btn.configure(text=self._theme_glyph())
+        if hasattr(self, '_theme_btn') and self._theme_btn:
+            if icon_obj:
+                self._theme_btn.configure(text="", image=icon_obj)
+            else:
+                self._theme_btn.configure(text=self._theme_glyph())
 
     def _on_refresh_page(self):
         active_tab_idx = getattr(self, '_active_tab_idx', 0)
@@ -1910,6 +2234,18 @@ class ModernApp(ctk.CTk):
             else:
                 page_nav.pack_forget()
 
+        # Ensure status bar is always visible at the bottom on all tabs (unless in preview mode)
+        status_bar = getattr(self, '_status_bar', None)
+        status_sep = getattr(self, '_status_bar_sep', None)
+        is_preview = (key == 'browse' and getattr(self, '_browse_mode', 'grid') == 'preview')
+        if status_bar and not is_preview:
+            try:
+                status_bar.pack(side='bottom', fill='x')
+                if status_sep:
+                    status_sep.pack(side='bottom', fill='x')
+            except Exception:
+                pass
+
         for btn_attr in ('_b_first', '_b_prev', '_b_next', '_b_go', '_jump_entry'):
             widget = getattr(self, btn_attr, None)
             if widget:
@@ -2032,6 +2368,7 @@ class ModernApp(ctk.CTk):
         try:
             snapshot = {
                 'tab_idx': self._current_tab_index(),
+                'settings_cat': getattr(self, '_active_settings_cat', 'general'),
                 'dest': self._var_get('_dest_var', self._dest),
                 'dl_url': self._var_get('_dl_url_var', self._url_input),
                 'cf_host': self._var_get('_cf_host_var'),
@@ -2084,21 +2421,32 @@ class ModernApp(ctk.CTk):
 
             self._build_ui()
 
-            self._site_key = snapshot['site_key']
-            self._site_var.set(snapshot['site_key'])
-            self._dest_var.set(snapshot['dest'])
-            self._dl_url_var.set(snapshot['dl_url'])
-            self._page_jump_var.set(snapshot['page_jump'])
-            self._conc_var.set(str(snapshot['concurrency']))
-            self._workers_var.set(str(snapshot['max_workers_per_video']))
-            self._speed_var.set(self._speed_label())
-            self._res_var.set(self._resolution_label())
-            if snapshot['cf_host']:
+            if hasattr(self, '_site_var') and self._site_var:
+                self._site_var.set(snapshot['site_key'])
+            if hasattr(self, '_dest_var') and self._dest_var:
+                self._dest_var.set(snapshot['dest'])
+            if hasattr(self, '_dl_url_var') and self._dl_url_var:
+                self._dl_url_var.set(snapshot['dl_url'])
+            if hasattr(self, '_page_jump_var') and self._page_jump_var:
+                self._page_jump_var.set(snapshot['page_jump'])
+            if hasattr(self, '_conc_var') and self._conc_var:
+                self._conc_var.set(str(snapshot['concurrency']))
+            if hasattr(self, '_workers_var') and self._workers_var:
+                self._workers_var.set(str(snapshot['max_workers_per_video']))
+            if hasattr(self, '_speed_var') and self._speed_var:
+                self._speed_var.set(self._speed_label())
+            if hasattr(self, '_res_var') and self._res_var:
+                self._res_var.set(self._resolution_label())
+            if hasattr(self, '_cf_host_var') and self._cf_host_var and snapshot.get('cf_host'):
                 self._cf_host_var.set(snapshot['cf_host'])
-            self._cf_cookie_var.set(snapshot['cf_cookie'])
-            self._cf_ua_var.set(snapshot['cf_ua'])
+            if hasattr(self, '_cf_cookie_var') and self._cf_cookie_var:
+                self._cf_cookie_var.set(snapshot.get('cf_cookie', ''))
+            if hasattr(self, '_cf_ua_var') and self._cf_ua_var:
+                self._cf_ua_var.set(snapshot.get('cf_ua', ''))
             self._refresh_cf_status()
             self._set_tab_index(snapshot['tab_idx'])
+            if snapshot['tab_idx'] < len(self._tab_keys) and self._tab_keys[snapshot['tab_idx']] == 'settings':
+                self._switch_settings_cat(snapshot.get('settings_cat', 'general'))
             self._update_selection_count()
             self._rebuild_sidebar()
             self._load_categories()
@@ -2112,9 +2460,29 @@ class ModernApp(ctk.CTk):
         header.pack(fill='x')
         header.pack_propagate(False)
 
-        # Brand Logo (Fetch + JAV Brand Color Gradient)
+        # Brand Logo (Software Logo Icon + Fetch + JAV Brand Color Gradient)
         brand = ctk.CTkFrame(header, fg_color='transparent')
         brand.pack(side='left', padx=16, fill='y')
+
+        self._brand_logo_lbl = None
+        logo_png_p = os.path.join(os.path.dirname(__file__), 'logo.png')
+        if not os.path.exists(logo_png_p):
+            logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'logo.png')
+        if not os.path.exists(logo_png_p):
+            logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'favicon-256x256.png')
+
+        if os.path.exists(logo_png_p):
+            try:
+                logo_pil = Image.open(logo_png_p)
+                self._brand_logo_img = ctk.CTkImage(
+                    light_image=logo_pil,
+                    dark_image=logo_pil,
+                    size=(28, 28)
+                )
+                self._brand_logo_lbl = ctk.CTkLabel(brand, image=self._brand_logo_img, text='')
+                self._brand_logo_lbl.pack(side='left', padx=(0, 8))
+            except Exception:
+                pass
 
         self._brand_lbl_fetch = ctk.CTkLabel(brand, text='Fetch',
                                              font=(ui_font(), 20, 'bold'),
@@ -2152,7 +2520,7 @@ class ModernApp(ctk.CTk):
             self._select_tab('browse')
             if getattr(self, '_browse_mode', 'grid') != 'grid':
                 self._set_browse_mode('grid')
-        for _logo_widget in (brand, self._brand_lbl_fetch, self._brand_lbl_jav, self._brand_lbl):
+        for _logo_widget in filter(None, (brand, self._brand_logo_lbl, self._brand_lbl_fetch, self._brand_lbl_jav, self._brand_lbl)):
             _logo_widget.bind('<Button-1>', _go_home)
             _logo_widget.configure(cursor='hand2')
 
@@ -2174,11 +2542,41 @@ class ModernApp(ctk.CTk):
         # Load search icon
         self._search_icon = None
         img_dir_s = os.path.join(os.path.dirname(__file__), 'img')
+        search_light_p = os.path.join(img_dir_s, 'icon_sub_search_light.png')
+        search_dark_p = os.path.join(img_dir_s, 'icon_sub_search_dark.png')
         search_p = os.path.join(img_dir_s, 'icon_search.png')
         try:
-            if os.path.exists(search_p):
+            if os.path.exists(search_light_p) and os.path.exists(search_dark_p):
+                self._search_icon = ctk.CTkImage(
+                    light_image=Image.open(search_light_p),
+                    dark_image=Image.open(search_dark_p),
+                    size=(18, 18)
+                )
+            elif os.path.exists(search_p):
                 search_img = Image.open(search_p)
-                self._search_icon = ctk.CTkImage(light_image=search_img, dark_image=search_img, size=(22, 22))
+                self._search_icon = ctk.CTkImage(light_image=search_img, dark_image=search_img, size=(18, 18))
+        except Exception:
+            pass
+
+        # Load compass icon (Search From All toggle; light/dark + off/on variants)
+        self._compass_icon = None
+        self._compass_icon_active = None
+        img_dir_c = os.path.join(os.path.dirname(__file__), 'img')
+        comp_light_p = os.path.join(img_dir_c, 'icon_compass_light.png')
+        comp_dark_p = os.path.join(img_dir_c, 'icon_compass_dark.png')
+        comp_on_light_p = os.path.join(img_dir_c, 'icon_compass_on_light.png')
+        comp_on_dark_p = os.path.join(img_dir_c, 'icon_compass_on_dark.png')
+        try:
+            if os.path.exists(comp_light_p) and os.path.exists(comp_dark_p):
+                self._compass_icon = ctk.CTkImage(
+                    light_image=Image.open(comp_light_p),
+                    dark_image=Image.open(comp_dark_p),
+                    size=(20, 20))
+            if os.path.exists(comp_on_light_p) and os.path.exists(comp_on_dark_p):
+                self._compass_icon_active = ctk.CTkImage(
+                    light_image=Image.open(comp_on_light_p),
+                    dark_image=Image.open(comp_on_dark_p),
+                    size=(20, 20))
         except Exception:
             pass
 
@@ -2195,15 +2593,24 @@ class ModernApp(ctk.CTk):
         except Exception:
             pass
 
-        # Load refresh icon (light & dark variants)
+        # Load refresh icon (light & dark variants: dull default and bright hover)
         self._refresh_icon = None
+        self._refresh_icon_hover = None
         ref_light_p = os.path.join(img_dir_t, 'icon_refresh_light.png')
         ref_dark_p = os.path.join(img_dir_t, 'icon_refresh_dark.png')
+        ref_hover_light_p = os.path.join(img_dir_t, 'icon_refresh_hover_light.png')
+        ref_hover_dark_p = os.path.join(img_dir_t, 'icon_refresh_hover_dark.png')
         try:
             if os.path.exists(ref_light_p) and os.path.exists(ref_dark_p):
                 r_light = Image.open(ref_light_p)
                 r_dark = Image.open(ref_dark_p)
                 self._refresh_icon = ctk.CTkImage(light_image=r_light, dark_image=r_dark, size=(16, 16))
+            if os.path.exists(ref_hover_light_p) and os.path.exists(ref_hover_dark_p):
+                rh_light = Image.open(ref_hover_light_p)
+                rh_dark = Image.open(ref_hover_dark_p)
+                self._refresh_icon_hover = ctk.CTkImage(light_image=rh_light, dark_image=rh_dark, size=(16, 16))
+            elif self._refresh_icon:
+                self._refresh_icon_hover = self._refresh_icon
         except Exception:
             pass
 
@@ -2267,38 +2674,37 @@ class ModernApp(ctk.CTk):
         right_info.pack(side='right', padx=16, fill='y')
         self._right_info_frame = right_info
 
-        icon_obj_theme = self._get_theme_icon()
-        self._theme_btn = ctk.CTkButton(
-            right_info, text="" if icon_obj_theme else self._theme_glyph(),
-            image=icon_obj_theme, width=36, height=36,
-            corner_radius=CONTROL_RADIUS, fg_color=BG_CARD, border_width=1,
-            border_color=BORDER, hover_color=BG_CARD_HOVER,
-            text_color=TEXT_SEC, font=(ui_font(), 12),
-            command=self._cycle_theme)
-        self._theme_btn.pack(side='right', padx=(8, 0), pady=7)
-
         ref_icon_obj = getattr(self, '_refresh_icon', None)
+        ref_hover_icon_obj = getattr(self, '_refresh_icon_hover', None)
         self._refresh_btn = ctk.CTkButton(
             right_info, text="" if ref_icon_obj else "↻",
             image=ref_icon_obj,
             width=36, height=36,
-            corner_radius=CONTROL_RADIUS, fg_color=BG_CARD, border_width=1,
-            border_color=BORDER, hover_color=BG_CARD_HOVER,
-            text_color=TEXT_PRI, font=(ui_font(), 13, 'bold'),
+            corner_radius=CONTROL_RADIUS, fg_color='transparent', border_width=0,
+            hover_color=BG_CARD_HOVER,
+            text_color=TEXT_SEC, font=(ui_font(), 13, 'bold'),
+            cursor='hand2',
             command=self._on_refresh_page)
         self._refresh_btn.pack(side='right', padx=(8, 0), pady=7)
 
-        self._lang_var = ctk.StringVar(value=self._lang_name_by_code.get(get_lang(), 'English'))
-        self._lang_menu = ctk.CTkOptionMenu(
-            right_info, values=[name for _, name in LANGUAGES],
-            variable=self._lang_var, command=self._on_lang_change,
-            width=110, height=36, corner_radius=CONTROL_RADIUS,
-            fg_color=BG_CARD, button_color=BG_CARD,
-            button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
-            dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
-            dropdown_text_color=WHITE, dynamic_resizing=False,
-            font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11))
-        self._lang_menu.pack(side='right', padx=(0, 0), pady=7)
+        def _on_ref_enter(e=None):
+            try:
+                if ref_hover_icon_obj:
+                    self._refresh_btn.configure(image=ref_hover_icon_obj)
+                self._refresh_btn.configure(text_color=TEXT_PRI)
+            except Exception:
+                pass
+
+        def _on_ref_leave(e=None):
+            try:
+                if ref_icon_obj:
+                    self._refresh_btn.configure(image=ref_icon_obj)
+                self._refresh_btn.configure(text_color=TEXT_SEC)
+            except Exception:
+                pass
+
+        self._refresh_btn.bind('<Enter>', _on_ref_enter, add='+')
+        self._refresh_btn.bind('<Leave>', _on_ref_leave, add='+')
 
         version_box = ctk.CTkFrame(
             right_info, fg_color='transparent')
@@ -2317,25 +2723,12 @@ class ModernApp(ctk.CTk):
 
 
 
-        # Content container holding the 3 tab frames
-        self._tab_container = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=0)
-        self._tab_container.pack(fill='both', expand=True)
-        self._tab_frames = {}
-        for key in self._tab_keys:
-            self._tab_frames[key] = ctk.CTkFrame(
-                self._tab_container, fg_color=BG_DARK, corner_radius=0)
-
-        self._build_browse_tab()
-        self._build_download_tab()
-        self._build_settings_tab()
-
-        self._select_tab(self._tab_keys[self._active_tab_idx])
-
-        # ── Inline Compact Status & Navigation Bar ──────────────────
-        ctk.CTkFrame(self, height=1, fg_color=BORDER, corner_radius=0).pack(fill='x')
+        # ── Inline Compact Status & Navigation Bar (Docked to bottom) ──────────────────
         self._status_bar = ctk.CTkFrame(self, height=32, fg_color=BG_HEADER, corner_radius=0)
-        self._status_bar.pack(fill='x')
+        self._status_bar.pack(side='bottom', fill='x')
         self._status_bar.pack_propagate(False)
+        self._status_bar_sep = ctk.CTkFrame(self, height=1, fg_color=BORDER, corner_radius=0)
+        self._status_bar_sep.pack(side='bottom', fill='x')
 
         self._status_lbl = ctk.CTkLabel(self._status_bar, text=T('status_ready'),
                                          font=('Consolas', 10),
@@ -2409,6 +2802,20 @@ class ModernApp(ctk.CTk):
         b_go.bind('<Enter>', lambda e: b_go.configure(text_color=WHITE))
         b_go.bind('<Leave>', lambda e: b_go.configure(text_color=TEXT_SEC))
 
+        # Content container holding the 3 tab frames (expands between header and status bar)
+        self._tab_container = ctk.CTkFrame(self, fg_color=BG_DARK, corner_radius=0)
+        self._tab_container.pack(fill='both', expand=True)
+        self._tab_frames = {}
+        for key in self._tab_keys:
+            self._tab_frames[key] = ctk.CTkFrame(
+                self._tab_container, fg_color=BG_DARK, corner_radius=0)
+
+        self._build_browse_tab()
+        self._build_download_tab()
+        self._build_settings_tab()
+
+        self._select_tab(self._tab_keys[self._active_tab_idx])
+
     # ── Browse Tab ───────────────────────────────────────────────────
     def _build_browse_tab(self):
         tab = self._tab_frames['browse']
@@ -2467,6 +2874,23 @@ class ModernApp(ctk.CTk):
         else:
             icon_lbl = ctk.CTkLabel(search_box, text="🔍", text_color=TEXT_SEC)
             icon_lbl.pack(side='right', padx=(2, 8))
+
+        # Compass toggle — Search From All (search every site in one page)
+        compass_obj = getattr(self, '_compass_icon', None)
+        self._compass_lbl = None
+        if compass_obj is not None:
+            compass_lbl = ctk.CTkLabel(search_box, text="", image=compass_obj,
+                                       width=28, height=20)
+            compass_lbl.pack(side='right', padx=(0, 2))
+            compass_lbl.bind('<Button-1>', lambda e: self._toggle_search_all())
+            try:
+                compass_lbl.configure(cursor='hand2')
+            except Exception:
+                pass
+            self._compass_lbl = compass_lbl
+            ToolTip(compass_lbl, lambda: (
+                T('search_all_tip_on') if self._search_all_mode else T('search_all_tip_off')))
+        self._update_search_all_indicator()
 
         # Container for right-side action buttons
         self._toolbar_actions = ctk.CTkFrame(self._top_toolbar_row1, fg_color='transparent')
@@ -2531,6 +2955,23 @@ class ModernApp(ctk.CTk):
             self._browse_workspace, fg_color=BG_DARK, corner_radius=0)
         self._browse_grid_area.pack(fill='both', expand=True)
 
+        # Entity page heading banner (actress / director / studio / tag).
+        # Shown only while browsing a filtered entity page (all of someone's work).
+        self._page_heading = ctk.CTkFrame(
+            self._browse_grid_area, fg_color=BG_CARD, corner_radius=0,
+            border_width=0)
+        self._page_heading_lbl = ctk.CTkLabel(
+            self._page_heading, text='', text_color=ACCENT,
+            font=(ui_font(), 13, 'bold'), anchor='e')
+        self._page_heading_lbl.pack(side='right', padx=16, pady=8)
+        self._page_heading_close = ctk.CTkButton(
+            self._page_heading, text=T('entity_close'), width=64, height=24,
+            fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+            font=(ui_font(), 10), corner_radius=CONTROL_RADIUS,
+            command=self._close_entity_page)
+        self._page_heading_close.pack(side='left', padx=12, pady=6)
+
         self._grid_scroll = ctk.CTkScrollableFrame(
             self._browse_grid_area, fg_color=BG_DARK, corner_radius=0,
             scrollbar_button_color=BORDER,
@@ -2567,12 +3008,15 @@ class ModernApp(ctk.CTk):
         sidebar = getattr(self, '_sidebar', None)
         workspace = getattr(self, '_browse_workspace', None)
         status_bar = getattr(self, '_status_bar', None)
+        status_sep = getattr(self, '_status_bar_sep', None)
         if not grid_area or not preview_area:
             return
         try:
             if mode == 'preview':
                 if sidebar:
                     sidebar.pack_forget()
+                if status_sep:
+                    status_sep.pack_forget()
                 if status_bar:
                     status_bar.pack_forget()
                 grid_area.pack_forget()
@@ -2584,7 +3028,9 @@ class ModernApp(ctk.CTk):
                 if sidebar and workspace:
                     sidebar.pack(side='left', fill='y', before=workspace)
                 if status_bar:
-                    status_bar.pack(fill='x')
+                    status_bar.pack(side='bottom', fill='x')
+                if status_sep:
+                    status_sep.pack(side='bottom', fill='x')
                 grid_area.pack(fill='both', expand=True)
         except tk.TclError:
             return
@@ -2664,11 +3110,29 @@ class ModernApp(ctk.CTk):
             '--quiet',
             '--no-xlib',
             '--avcodec-hw=any',
-            '--network-caching=3000',
+            '--network-caching=500',
+            '--live-caching=500',
+            '--file-caching=400',
+            '--http-reconnect',
+            '--clock-jitter=0',
+            '--clock-synchro=0',
+            '--avcodec-fast',
+            '--avcodec-threads=4',
+            '--avcodec-skiploopfilter=1',
+            '--drop-late-frames',
+            '--skip-frames',
+            '--no-video-title-show',
         ]
         instance = vlc.Instance(*vlc_args)
         player = instance.media_player_new()
-        player.set_media(instance.media_new(proxied_url))
+        media = instance.media_new(proxied_url)
+        media.add_option(':http-reconnect=true')
+        media.add_option(':network-caching=500')
+        media.add_option(':live-caching=500')
+        media.add_option(':file-caching=400')
+        media.add_option(':clock-jitter=0')
+        media.add_option(':clock-synchro=0')
+        player.set_media(media)
 
         canvas.update()
         if sys.platform == 'win32':
@@ -2685,6 +3149,17 @@ class ModernApp(ctk.CTk):
     def _init_vlc_player(self, media_url: str, headers: dict, canvas: tk.Canvas):
         try:
             import vlc
+
+            # Stop and release any existing preview player first
+            old = getattr(self, '_preview_player', None)
+            if old is not None:
+                try:
+                    old.stop()
+                    old.release()
+                except Exception:
+                    pass
+                self._preview_player = None
+
             if not hasattr(self, '_preview_proxy') or self._preview_proxy is None:
                 self._preview_proxy = PreviewProxyServer()
             self._preview_proxy.start()
@@ -2696,26 +3171,29 @@ class ModernApp(ctk.CTk):
             if player is None:
                 return False
 
-            # Initialize Subtitle Subsystem
-            try:
-                self._subtitle_mgr = SubtitleManager()
-                preview_vid = getattr(self, '_preview_video', {}) or {}
-                self._subtitle_mgr.load_tracks_for_video(preview_vid, media_path=media_url)
-            except Exception:
-                pass
-
             player.play()
             self._start_player_update_loop()
             self._update_cc_button_state()
 
-            # Apply initial subtitle track after playback starts
-            def _apply_initial_sub():
-                if getattr(self, '_preview_player', None) == player and getattr(self, '_subtitle_mgr', None):
-                    if self._subtitle_mgr.active_track_id:
-                        self._subtitle_mgr.set_active_track(self._subtitle_mgr.active_track_id, player)
-                    self._update_cc_button_state()
+            # Initialize Subtitle Subsystem asynchronously so it never blocks or delays video startup
+            def _init_subtitles_async():
+                try:
+                    sub_mgr = SubtitleManager()
+                    preview_vid = getattr(self, '_preview_video', {}) or {}
+                    sub_mgr.load_tracks_for_video(preview_vid, media_path=media_url)
+                    self._subtitle_mgr = sub_mgr
 
-            self.after(300, _apply_initial_sub)
+                    def _apply_initial_sub():
+                        if getattr(self, '_preview_player', None) == player and getattr(self, '_subtitle_mgr', None):
+                            if sub_mgr.active_track_id:
+                                sub_mgr.set_active_track(sub_mgr.active_track_id, player)
+                            self._update_cc_button_state()
+
+                    self.after(0, _apply_initial_sub)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_init_subtitles_async, daemon=True).start()
             return True
         except Exception as exc:
             return False
@@ -2828,12 +3306,38 @@ class ModernApp(ctk.CTk):
             else:
                 player.play()
 
+    def _on_player_slider_press(self, event=None):
+        self._is_seeking = True
+
+    def _on_player_slider_drag(self, value):
+        self._is_seeking = True
+        player = getattr(self, '_preview_player', None)
+        if player:
+            length_ms = player.get_length()
+            if length_ms > 0:
+                target_ms = int(float(value) * length_ms)
+                time_lbl = getattr(self, '_player_time_lbl', None)
+                if time_lbl:
+                    t_str = self._format_duration_ms(target_ms)
+                    d_str = self._format_duration_ms(length_ms)
+                    time_lbl.configure(text=f'{t_str} / {d_str}')
+
+    def _on_player_slider_release(self, event=None):
+        slider = getattr(self, '_player_slider', None)
+        if slider:
+            try:
+                self._on_player_seek(slider.get())
+            except Exception:
+                pass
+        self.after(350, lambda: setattr(self, '_is_seeking', False))
+
     def _on_player_seek(self, value):
         player = getattr(self, '_preview_player', None)
         if player:
             length_ms = player.get_length()
             if length_ms > 0:
                 target_ms = int(float(value) * length_ms)
+                target_ms = max(0, min(target_ms, max(0, length_ms - 500)))
                 player.set_time(target_ms)
 
     def _on_global_player_key(self, event):
@@ -2891,9 +3395,16 @@ class ModernApp(ctk.CTk):
     def _on_player_right(self, event=None):
         player = getattr(self, '_preview_player', None)
         if player:
+            length_ms = player.get_length()
             time_ms = player.get_time()
             if time_ms >= 0:
-                player.set_time(time_ms + 10000)
+                target_ms = time_ms + 10000
+                if length_ms > 0:
+                    target_ms = min(target_ms, max(0, length_ms - 500))
+                player.set_time(target_ms)
+                slider = getattr(self, '_player_slider', None)
+                if slider and length_ms > 0:
+                    slider.set(max(0.0, min(1.0, target_ms / length_ms)))
             return
         web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
         if web_frame:
@@ -2905,9 +3416,14 @@ class ModernApp(ctk.CTk):
     def _on_player_left(self, event=None):
         player = getattr(self, '_preview_player', None)
         if player:
+            length_ms = player.get_length()
             time_ms = player.get_time()
             if time_ms >= 0:
-                player.set_time(max(0, time_ms - 10000))
+                target_ms = max(0, time_ms - 10000)
+                player.set_time(target_ms)
+                slider = getattr(self, '_player_slider', None)
+                if slider and length_ms > 0:
+                    slider.set(max(0.0, min(1.0, target_ms / length_ms)))
             return
         web_frame = getattr(getattr(self, '_player_container_ref', None), '_web_frame', None)
         if web_frame:
@@ -3005,8 +3521,10 @@ class ModernApp(ctk.CTk):
             controls, from_=0.0, to=1.0, height=14,
             button_color=ACCENT, button_hover_color=ACCENT_HOVER,
             progress_color=ACCENT, fg_color=BORDER,
-            command=self._on_player_seek)
+            command=self._on_player_slider_drag)
         self._player_slider.pack(side='left', fill='x', expand=True, padx=8)
+        self._player_slider.bind('<Button-1>', self._on_player_slider_press, add='+')
+        self._player_slider.bind('<ButtonRelease-1>', self._on_player_slider_release, add='+')
 
         ctk.CTkLabel(controls, text='🔊', text_color=TEXT_DIM, font=(ui_font(), 11)).pack(side='left', padx=(4, 0))
         self._player_vol_slider = ctk.CTkSlider(
@@ -3076,6 +3594,11 @@ class ModernApp(ctk.CTk):
             win.title('')
             win.configure(fg_color='#000000')
             win.attributes('-fullscreen', True)
+            if getattr(self, '_ico_path') and os.path.exists(self._ico_path):
+                try:
+                    win.iconbitmap(self._ico_path)
+                except Exception:
+                    pass
             win.bind('<Escape>', self._exit_fullscreen_player, add='+')
             win.bind('<Double-Button-1>', self._toggle_fullscreen_player, add='+')
             win.protocol('WM_DELETE_WINDOW', self._exit_fullscreen_player)
@@ -3221,22 +3744,139 @@ class ModernApp(ctk.CTk):
 
         modal = ctk.CTkToplevel(self)
         modal.title(T('subtitle_title'))
-        modal.geometry("460x520")
+        modal_w = 520
+        modal_h = 640
+        try:
+            self.update_idletasks()
+            pw = self.winfo_width()
+            ph = self.winfo_height()
+            px = self.winfo_rootx()
+            py = self.winfo_rooty()
+            x = max(0, px + (pw - modal_w) // 2)
+            y = max(0, py + (ph - modal_h) // 2)
+            modal.geometry(f"{modal_w}x{modal_h}+{x}+{y}")
+        except Exception:
+            modal.geometry(f"{modal_w}x{modal_h}")
         modal.resizable(False, False)
         modal.transient(self)
         modal.grab_set()
         modal.configure(fg_color=BG_DARK)
+        if getattr(self, '_ico_path') and os.path.exists(self._ico_path):
+            try:
+                modal.iconbitmap(self._ico_path)
+            except Exception:
+                pass
 
         main_body = ctk.CTkFrame(modal, fg_color=BG_DARK, corner_radius=0)
         main_body.pack(fill='both', expand=True, padx=16, pady=16)
 
-        # Available tracks scroll frame
+        # ── Inline Tab Bar: Available Subtitles | Search Online | Sync with Audio ──
+        tab_bar = ctk.CTkFrame(main_body, fg_color='transparent')
+        tab_bar.pack(fill='x', pady=(0, 10))
+
+        tab_btn_row = ctk.CTkFrame(tab_bar, fg_color='transparent')
+        tab_btn_row.pack(fill='x')
+
+        active_pane = tk.StringVar(value='tracks')
+
+        def _update_tab_states():
+            current = active_pane.get()
+            tracks_btn.configure(
+                fg_color=BG_CARD_HOVER if current == 'tracks' else 'transparent',
+                text_color=TEXT_PRI if current == 'tracks' else TEXT_SEC,
+                font=(ui_font(), 11, 'bold' if current == 'tracks' else 'normal')
+            )
+            search_btn.configure(
+                fg_color=BG_CARD_HOVER if current == 'search' else 'transparent',
+                text_color=TEXT_PRI if current == 'search' else TEXT_SEC,
+                font=(ui_font(), 11, 'bold' if current == 'search' else 'normal')
+            )
+            sync_btn.configure(
+                fg_color=BG_CARD_HOVER if current == 'sync' else 'transparent',
+                text_color=TEXT_PRI if current == 'sync' else TEXT_SEC,
+                font=(ui_font(), 11, 'bold' if current == 'sync' else 'normal')
+            )
+
+        def _show_tracks():
+            active_pane.set('tracks')
+            _update_tab_states()
+            tracks_content.pack(fill='both', expand=True)
+            search_content.pack_forget()
+            sync_content.pack_forget()
+
+        def _show_search():
+            active_pane.set('search')
+            _update_tab_states()
+            search_content.pack(fill='both', expand=True)
+            tracks_content.pack_forget()
+            sync_content.pack_forget()
+
+        def _show_sync():
+            active_pane.set('sync')
+            _update_tab_states()
+            try:
+                cur_active = sub_mgr.get_active_track()
+                if cur_active:
+                    sync_track_val_lbl.configure(
+                        text=f"✓  {cur_active.name}",
+                        text_color=TEXT_PRI
+                    )
+                else:
+                    sync_track_val_lbl.configure(
+                        text="⚠  No active track (select one in Available Subtitles)",
+                        text_color=WARNING
+                    )
+                cur_offset = sub_mgr.get_sync_offset_ms()
+                offset_var.set(_offset_label_text(cur_offset))
+            except Exception:
+                pass
+            sync_content.pack(fill='both', expand=True)
+            tracks_content.pack_forget()
+            search_content.pack_forget()
+
+        tracks_btn = ctk.CTkButton(
+            tab_btn_row, text='Available Subtitles', height=32,
+            corner_radius=CONTROL_RADIUS,
+            fg_color=BG_CARD_HOVER, hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, font=(ui_font(), 11, 'bold'),
+            command=_show_tracks)
+        tracks_btn.pack(side='left', fill='x', expand=True, padx=(0, 2))
+
+        search_btn = ctk.CTkButton(
+            tab_btn_row, text='Search Online', height=32,
+            corner_radius=CONTROL_RADIUS,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_SEC, font=(ui_font(), 11),
+            command=_show_search)
+        search_btn.pack(side='left', fill='x', expand=True, padx=2)
+
+        sync_btn = ctk.CTkButton(
+            tab_btn_row, text='Sync with Audio', height=32,
+            corner_radius=CONTROL_RADIUS,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_SEC, font=(ui_font(), 11),
+            command=_show_sync)
+        sync_btn.pack(side='left', fill='x', expand=True, padx=(2, 0))
+
+        ctk.CTkFrame(tab_bar, height=1, fg_color=BORDER).pack(fill='x', pady=(10, 0))
+
+        # ── Content Panes ──
+        tracks_content = ctk.CTkFrame(main_body, fg_color='transparent')
+        search_content = ctk.CTkFrame(main_body, fg_color='transparent')
+        sync_content = ctk.CTkFrame(main_body, fg_color='transparent')
+
+        # ── 1. AVAILABLE SUBTITLES PANE ──
+        tracks_col = ctk.CTkFrame(
+            tracks_content, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        tracks_col.pack(fill='both', expand=True)
+
         tracks_scroll = ctk.CTkScrollableFrame(
-            main_body, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
-            border_width=1, border_color=BORDER_CARD,
+            tracks_col, fg_color='transparent', corner_radius=CARD_RADIUS,
             scrollbar_button_color=BORDER, scrollbar_button_hover_color=BORDER_HOVER
         )
-        tracks_scroll.pack(fill='both', expand=True, pady=(0, 12))
+        tracks_scroll.pack(fill='both', expand=True, padx=8, pady=8)
 
         def _refresh_track_list():
             for child in tracks_scroll.winfo_children():
@@ -3271,12 +3911,6 @@ class ModernApp(ctk.CTk):
             else:
                 off_btn.deselect()
             off_btn.pack(side='left', padx=10, pady=6)
-
-            if current_tracks:
-                ctk.CTkLabel(
-                    tracks_scroll, text='────── Available Subtitles ──────',
-                    text_color=TEXT_DIM, font=(ui_font(), 9)
-                ).pack(fill='x', pady=6)
 
             for track in current_tracks:
                 is_active = (track.id == active_id)
@@ -3318,10 +3952,6 @@ class ModernApp(ctk.CTk):
 
         _refresh_track_list()
 
-        # Action Buttons Row
-        actions_box = ctk.CTkFrame(main_body, fg_color='transparent')
-        actions_box.pack(fill='x', side='bottom')
-
         def _on_load_local_file():
             file_path = filedialog.askopenfilename(
                 title=T('subtitle_load_file'),
@@ -3342,58 +3972,241 @@ class ModernApp(ctk.CTk):
                 except Exception as exc:
                     messagebox.showerror("Subtitle Error", f"{T('subtitle_error_load')}\n{exc}")
 
+        local_icon = getattr(self, '_sub_local_icon', None)
+        load_bar = ctk.CTkFrame(tracks_content, fg_color='transparent')
+        load_bar.pack(fill='x', pady=(10, 0))
         ctk.CTkButton(
-            actions_box, text=T('subtitle_load_file'), height=36,
+            load_bar, text="  " + T('subtitle_load_file'), height=36,
+            image=local_icon, compound='left',
             fg_color='transparent', hover_color=BG_CARD_HOVER,
             text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
             corner_radius=CONTROL_RADIUS, font=(ui_font(), 11, 'bold'),
             command=_on_load_local_file
-        ).pack(fill='x', pady=(0, 6))
-
-        def _on_open_search_online():
-            modal.destroy()
-            self._open_online_subtitle_search_modal()
-
-        ctk.CTkButton(
-            actions_box, text=T('subtitle_search_online'), height=36,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-            text_color=WHITE, corner_radius=CONTROL_RADIUS,
-            font=(ui_font(), 11, 'bold'),
-            command=_on_open_search_online
         ).pack(fill='x')
 
-    def _open_online_subtitle_search_modal(self):
-        sub_mgr = getattr(self, '_subtitle_mgr', None)
-        if not sub_mgr:
-            return
+        # ── 2. SYNC CONTENT (shown when the Sync tab is active) ──
+        sync_scroll = ctk.CTkScrollableFrame(
+            sync_content, fg_color='transparent', corner_radius=CARD_RADIUS,
+            scrollbar_button_color=BORDER, scrollbar_button_hover_color=BORDER_HOVER
+        )
+        sync_scroll.pack(fill='both', expand=True)
 
-        modal = ctk.CTkToplevel(self)
-        modal.title(T('subtitle_online_title'))
-        modal.geometry("560x540")
-        modal.resizable(False, False)
-        modal.transient(self)
-        modal.grab_set()
-        modal.configure(fg_color=BG_DARK)
+        # ── Target Track Info Card ──
+        sync_track_card = ctk.CTkFrame(
+            sync_scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        sync_track_card.pack(fill='x', pady=(0, 10))
 
-        main_body = ctk.CTkFrame(modal, fg_color=BG_DARK, corner_radius=0)
-        main_body.pack(fill='both', expand=True, padx=16, pady=16)
+        sync_track_inner = ctk.CTkFrame(sync_track_card, fg_color='transparent')
+        sync_track_inner.pack(fill='x', padx=14, pady=10)
 
-        # Search Query Bar
-        query_frame = ctk.CTkFrame(main_body, fg_color='transparent')
-        query_frame.pack(fill='x', pady=(0, 10))
+        ctk.CTkLabel(
+            sync_track_inner, text='TARGET SUBTITLE TRACK',
+            text_color=TEXT_DIM, font=(ui_font(), 9, 'bold'), anchor='w'
+        ).pack(fill='x')
+
+        sync_track_val_lbl = ctk.CTkLabel(
+            sync_track_inner, text='',
+            text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'), anchor='w', justify='left'
+        )
+        sync_track_val_lbl.pack(fill='x', pady=(2, 0))
+
+        # ── Manual Timing Offset Card ──
+        manual_card = ctk.CTkFrame(
+            sync_scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        manual_card.pack(fill='x', pady=(0, 10))
+
+        manual_inner = ctk.CTkFrame(manual_card, fg_color='transparent')
+        manual_inner.pack(fill='both', expand=True, padx=14, pady=12)
+
+        manual_top_row = ctk.CTkFrame(manual_inner, fg_color='transparent')
+        manual_top_row.pack(fill='x', pady=(0, 10))
+
+        ctk.CTkLabel(
+            manual_top_row, text='Manual Timing Offset',
+            text_color=TEXT_PRI, font=(ui_font(), 12, 'bold')
+        ).pack(side='left')
+
+        ctk.CTkLabel(
+            manual_top_row, text='Nudge +/- delay in seconds',
+            text_color=TEXT_DIM, font=(ui_font(), 10)
+        ).pack(side='right')
+
+        def _offset_label_text(ms):
+            sign = '+' if ms >= 0 else '-'
+            return f"{sign}{abs(ms) / 1000.0:.1f}s"
+
+        offset_var = ctk.StringVar(value=_offset_label_text(0))
+
+        def _apply_sync(step_ms):
+            current = sub_mgr.get_sync_offset_ms()
+            new_ms = sub_mgr.set_sync_offset_ms(
+                current + step_ms, getattr(self, '_preview_player', None))
+            offset_var.set(_offset_label_text(new_ms))
+            sync_status_lbl.configure(text='', text_color=TEXT_DIM)
+
+        def _apply_reset():
+            new_ms = sub_mgr.reset_sync_offset(getattr(self, '_preview_player', None))
+            offset_var.set(_offset_label_text(new_ms))
+            sync_status_lbl.configure(text='Offset reset to 0.0s', text_color=SUCCESS)
+
+        # Digital Offset Readout Badge
+        offset_display_box = ctk.CTkFrame(
+            manual_inner, fg_color=BG_INPUT, corner_radius=CONTROL_RADIUS,
+            border_width=1, border_color=BORDER, height=48
+        )
+        offset_display_box.pack(fill='x', pady=(0, 12))
+        offset_display_box.pack_propagate(False)
+
+        ctk.CTkLabel(
+            offset_display_box, textvariable=offset_var,
+            text_color=ACCENT, font=(ui_font(), 20, 'bold')
+        ).pack(expand=True)
+
+        # Step Buttons (Regular outline, evenly gridded)
+        step_btn_row = ctk.CTkFrame(manual_inner, fg_color='transparent')
+        step_btn_row.pack(fill='x', pady=(0, 8))
+        for col_idx in range(4):
+            step_btn_row.grid_columnconfigure(col_idx, weight=1)
+
+        def _make_regular_step_btn(parent, text, step_ms, col):
+            btn = ctk.CTkButton(
+                parent, text=text, height=34,
+                fg_color='transparent', hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
+                corner_radius=CONTROL_RADIUS, font=(ui_font(), 11, 'bold'),
+                command=lambda s=step_ms: _apply_sync(s)
+            )
+            btn.grid(row=0, column=col, sticky='ew', padx=2)
+            return btn
+
+        for idx, (text, step) in enumerate((('-1s', -1000), ('-0.5s', -500), ('+0.5s', 500), ('+1s', 1000))):
+            _make_regular_step_btn(step_btn_row, text, step, idx)
+
+        # Reset button (Regular outline)
+        reset_btn = ctk.CTkButton(
+            manual_inner, text='Reset Offset (0.0s)', height=32,
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_SEC, border_width=1, border_color=BORDER_HOVER,
+            corner_radius=CONTROL_RADIUS, font=(ui_font(), 10, 'bold'),
+            command=_apply_reset
+        )
+        reset_btn.pack(fill='x', pady=(2, 0))
+
+        # ── AI Speech Alignment Card ──
+        auto_card = ctk.CTkFrame(
+            sync_scroll, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        auto_card.pack(fill='x', pady=(0, 10))
+
+        auto_inner = ctk.CTkFrame(auto_card, fg_color='transparent')
+        auto_inner.pack(fill='both', expand=True, padx=14, pady=12)
+
+        ctk.CTkLabel(
+            auto_inner, text='AI Speech Alignment',
+            text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'), anchor='w'
+        ).pack(fill='x')
+
+        ctk.CTkLabel(
+            auto_inner,
+            text='Detects voice patterns in audio stream and automatically aligns subtitle timestamps.',
+            text_color=TEXT_SEC, font=(ui_font(), 10), wraplength=440, justify='left', anchor='w'
+        ).pack(fill='x', pady=(2, 10))
+
+        # Ghost Auto Sync Button with Primary Color Boundary
+        auto_btn = ctk.CTkButton(
+            auto_inner, text='⚡ Auto Sync with Audio', height=38,
+            fg_color='transparent', hover_color=ACCENT_DIM,
+            text_color=ACCENT, border_width=1, border_color=ACCENT,
+            corner_radius=CONTROL_RADIUS, font=(ui_font(), 12, 'bold'),
+            command=lambda: _do_auto_sync()
+        )
+        auto_btn.pack(fill='x', pady=(0, 6))
+
+        sync_status_lbl = ctk.CTkLabel(
+            auto_inner, text="", text_color=TEXT_DIM,
+            font=(ui_font(), 10), wraplength=440, justify='center'
+        )
+        sync_status_lbl.pack(fill='x', pady=(2, 0))
+
+        def _do_auto_sync():
+            active = sub_mgr.get_active_track()
+            if active is None:
+                sync_status_lbl.configure(
+                    text='Please select a subtitle track in Available Subtitles first',
+                    text_color=ERROR_C)
+                return
+            source = getattr(self, '_preview_source', None)
+            media_url = getattr(source, 'media_url', '') or ''
+            headers = dict(getattr(source, 'headers', {}) or {})
+            auto_btn.configure(
+                state='disabled', text='Analyzing audio…',
+                border_color=BORDER_HOVER, text_color=TEXT_DIM)
+            sync_status_lbl.configure(text='Detecting speech timestamps…', text_color=ACCENT)
+
+            def _on_auto_done(offset_ms, err):
+                def _ui():
+                    try:
+                        auto_btn.configure(
+                            state='normal', text='⚡ Auto Sync with Audio',
+                            border_color=ACCENT, text_color=ACCENT)
+                        if err:
+                            sync_status_lbl.configure(
+                                text=f'Auto sync failed: {err}', text_color=ERROR_C)
+                            return
+                        applied = sub_mgr.set_sync_offset_ms(
+                            offset_ms, getattr(self, '_preview_player', None))
+                        offset_var.set(_offset_label_text(applied))
+                        if applied:
+                            sync_status_lbl.configure(
+                                text=f'Auto sync applied: {_offset_label_text(applied)}',
+                                text_color=SUCCESS)
+                        else:
+                            sync_status_lbl.configure(
+                                text='Subtitles are already in sync', text_color=SUCCESS)
+                    except Exception:
+                        pass
+                try:
+                    self.after(0, _ui)
+                except Exception:
+                    pass
+
+            sub_mgr.auto_sync_track(active, media_url, headers, on_done=_on_auto_done)
+
+        # ── 3. SEARCH CONTENT (shown when the Search tab is active) ──
+        search_col = ctk.CTkFrame(
+            search_content, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        search_col.pack(fill='both', expand=True)
+
+        search_inner = ctk.CTkFrame(search_col, fg_color='transparent')
+        search_inner.pack(fill='both', expand=True, padx=12, pady=12)
 
         default_query = video_code(self._preview_video) if getattr(self, '_preview_video', None) else ""
         if not default_query and getattr(self, '_preview_video', None):
             default_query = str(self._preview_video.get('title') or '')[:30]
 
         query_entry = ctk.CTkEntry(
-            query_frame, placeholder_text=T('subtitle_search_placeholder'),
-            fg_color=BG_CARD, text_color=TEXT_PRI, border_color=BORDER,
-            corner_radius=CONTROL_RADIUS, font=(ui_font(), 11)
+            search_inner, placeholder_text=T('subtitle_search_placeholder'),
+            placeholder_text_color=('#B0AAA5', '#585350'),
+            fg_color=BG_INPUT, text_color=TEXT_PRI, border_color=BORDER,
+            border_width=1, corner_radius=CONTROL_RADIUS, height=34,
+            font=(ui_font(), 11)
         )
-        query_entry.pack(side='left', fill='x', expand=True, padx=(0, 6))
+        query_entry.pack(fill='x', pady=(0, 8))
         if default_query:
             query_entry.insert(0, default_query)
+
+        filter_row = ctk.CTkFrame(search_inner, fg_color='transparent')
+        filter_row.pack(fill='x', pady=(0, 8))
+        filter_row.grid_columnconfigure(0, weight=4)
+        filter_row.grid_columnconfigure(1, weight=4)
+        filter_row.grid_columnconfigure(2, weight=3)
 
         lang_options = [
             T('subtitle_all_langs'), 'English', 'Japanese', 'Traditional Chinese', 'Simplified Chinese',
@@ -3402,40 +4215,109 @@ class ModernApp(ctk.CTk):
         lang_var = ctk.StringVar(value=T('subtitle_all_langs'))
 
         lang_menu = ctk.CTkOptionMenu(
-            query_frame, variable=lang_var, values=lang_options,
-            width=120, height=32, fg_color=BG_CARD, button_color=BORDER,
-            button_hover_color=BORDER_HOVER, text_color=TEXT_PRI,
-            dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
-            font=(ui_font(), 10)
+            filter_row, variable=lang_var, values=lang_options,
+            height=34,
+            fg_color=BG_CARD, button_color=BG_CARD,
+            button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+            dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+            dropdown_text_color=WHITE, dynamic_resizing=False,
+            corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)
         )
-        lang_menu.pack(side='left', padx=(0, 6))
+        lang_menu.grid(row=0, column=0, sticky='ew', padx=(0, 4))
 
         prov_options = [T('subtitle_all_providers'), 'SubtitleCat', 'YTS Subtitles', 'OpenSubtitles', 'SubDL', 'Podnapisi']
         prov_var = ctk.StringVar(value=T('subtitle_all_providers'))
 
         prov_menu = ctk.CTkOptionMenu(
-            query_frame, variable=prov_var, values=prov_options,
-            width=130, height=32, fg_color=BG_CARD, button_color=BORDER,
-            button_hover_color=BORDER_HOVER, text_color=TEXT_PRI,
-            dropdown_fg_color=BG_CARD, dropdown_hover_color=BG_CARD_HOVER,
-            font=(ui_font(), 10)
+            filter_row, variable=prov_var, values=prov_options,
+            height=34,
+            fg_color=BG_CARD, button_color=BG_CARD,
+            button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+            dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+            dropdown_text_color=WHITE, dynamic_resizing=False,
+            corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)
         )
-        prov_menu.pack(side='left', padx=(0, 6))
+        prov_menu.grid(row=0, column=1, sticky='ew', padx=(0, 4))
 
-        # Status Label
+        search_icon = getattr(self, '_sub_search_icon', None)
+        search_btn = ctk.CTkButton(
+            filter_row, text="  " + T('subtitle_search_btn'), height=34,
+            image=search_icon, compound='left',
+            fg_color='transparent', hover_color=BG_CARD_HOVER,
+            text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
+            corner_radius=CONTROL_RADIUS, font=(ui_font(), 11, 'bold'),
+            command=lambda: _do_search()
+        )
+        search_btn.grid(row=0, column=2, sticky='ew')
+
         status_lbl = ctk.CTkLabel(
-            main_body, text="", text_color=TEXT_DIM,
+            search_inner, text="", text_color=TEXT_DIM,
             font=(ui_font(), 10)
         )
         status_lbl.pack(anchor='w', pady=(0, 6))
 
-        # Results scroll container
         results_scroll = ctk.CTkScrollableFrame(
-            main_body, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+            search_inner, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
             border_width=1, border_color=BORDER_CARD,
             scrollbar_button_color=BORDER, scrollbar_button_hover_color=BORDER_HOVER
         )
         results_scroll.pack(fill='both', expand=True)
+
+        _result_seen: set = set()
+
+        def _append_result_card(res):
+            card = ctk.CTkFrame(
+                results_scroll, fg_color=BG_DARK,
+                corner_radius=4, border_width=1, border_color=BORDER
+            )
+            card.pack(fill='x', pady=4, padx=4)
+
+            info_box = ctk.CTkFrame(card, fg_color='transparent')
+            info_box.pack(side='left', fill='both', expand=True, padx=10, pady=8)
+
+            ctk.CTkLabel(
+                info_box, text=res.title, text_color=TEXT_PRI,
+                font=(ui_font(), 11, 'bold'), anchor='w', justify='left'
+            ).pack(anchor='w')
+
+            meta_sub = ctk.CTkLabel(
+                info_box, text=f"Language: {res.language} • Provider: {res.provider}",
+                text_color=TEXT_DIM, font=(ui_font(), 9), anchor='w'
+            )
+            meta_sub.pack(anchor='w', pady=(2, 0))
+
+            def _make_download_cmd(target_res=res):
+                def _dl():
+                    status_lbl.configure(text=T('subtitle_downloading'), text_color=ACCENT)
+
+                    def _on_dl_done(track, dl_err):
+                        def _dl_ui():
+                            if dl_err or not track:
+                                status_lbl.configure(
+                                    text=str(dl_err or T('subtitle_error_load')), text_color=ERROR_C)
+                            else:
+                                status_lbl.configure(
+                                    text=f"Downloaded: {track.name}", text_color=SUCCESS)
+                                self._update_cc_button_state()
+                                _refresh_track_list()
+                        try:
+                            self.after(0, _dl_ui)
+                        except Exception:
+                            pass
+
+                    sub_mgr.download_online_track_async(target_res, on_complete=_on_dl_done)
+                return _dl
+
+            ctk.CTkButton(
+                card, text='Download & Use', width=120, height=30,
+                fg_color='transparent', hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, border_width=1, border_color=BORDER_HOVER,
+                corner_radius=CONTROL_RADIUS,
+                font=(ui_font(), 10, 'bold'),
+                command=_make_download_cmd()
+            ).pack(side='right', padx=10, pady=8)
 
         def _do_search():
             q = query_entry.get().strip()
@@ -3445,12 +4327,34 @@ class ModernApp(ctk.CTk):
             status_lbl.configure(text=T('subtitle_searching'), text_color=ACCENT)
             for child in results_scroll.winfo_children():
                 child.destroy()
+            _result_seen.clear()
 
             selected_lang = lang_var.get()
             lang_filter = None if selected_lang == T('subtitle_all_langs') else selected_lang
 
             selected_prov = prov_var.get()
             prov_filter = None if selected_prov in (T('subtitle_all_providers'), 'All Providers') else selected_prov
+
+            def _on_search_progress(partial):
+                def _ui():
+                    if getattr(self, '_is_closing', False):
+                        return
+                    added = 0
+                    for res in partial:
+                        key = (res.provider, res.download_url, res.title)
+                        if key in _result_seen:
+                            continue
+                        _result_seen.add(key)
+                        _append_result_card(res)
+                        added += 1
+                    if added:
+                        status_lbl.configure(
+                            text=f"Found {len(_result_seen)} subtitle(s)...",
+                            text_color=TEXT_DIM)
+                try:
+                    self.after(0, _ui)
+                except Exception:
+                    pass
 
             def _on_search_done(results, error_msg):
                 def _ui_update():
@@ -3459,86 +4363,35 @@ class ModernApp(ctk.CTk):
                     if error_msg:
                         status_lbl.configure(text=error_msg, text_color=ERROR_C)
                         return
-
-                    status_lbl.configure(
-                        text=f"Found {len(results)} subtitle(s)",
-                        text_color=TEXT_DIM if results else ERROR_C
-                    )
-
-                    for child in results_scroll.winfo_children():
-                        child.destroy()
-
-                    if not results:
+                    added = 0
+                    for res in results:
+                        key = (res.provider, res.download_url, res.title)
+                        if key in _result_seen:
+                            continue
+                        _result_seen.add(key)
+                        _append_result_card(res)
+                        added += 1
+                    if not _result_seen:
                         ctk.CTkLabel(
                             results_scroll, text=T('subtitle_no_results'),
                             text_color=TEXT_DIM, font=(ui_font(), 12)
                         ).pack(expand=True, pady=40)
-                        return
-
-                    for res in results:
-                        card = ctk.CTkFrame(
-                            results_scroll, fg_color=BG_DARK,
-                            corner_radius=4, border_width=1, border_color=BORDER
-                        )
-                        card.pack(fill='x', pady=4, padx=4)
-
-                        info_box = ctk.CTkFrame(card, fg_color='transparent')
-                        info_box.pack(side='left', fill='both', expand=True, padx=10, pady=8)
-
-                        ctk.CTkLabel(
-                            info_box, text=res.title, text_color=TEXT_PRI,
-                            font=(ui_font(), 11, 'bold'), anchor='w', justify='left'
-                        ).pack(anchor='w')
-
-                        meta_sub = ctk.CTkLabel(
-                            info_box, text=f"Language: {res.language} • Provider: {res.provider}",
-                            text_color=TEXT_DIM, font=(ui_font(), 9), anchor='w'
-                        )
-                        meta_sub.pack(anchor='w', pady=(2, 0))
-
-                        def _make_download_cmd(target_res=res):
-                            def _dl():
-                                status_lbl.configure(text=T('subtitle_downloading'), text_color=ACCENT)
-                                def _on_dl_done(track, dl_err):
-                                    def _dl_ui():
-                                        if dl_err or not track:
-                                            status_lbl.configure(text=str(dl_err or T('subtitle_error_load')), text_color=ERROR_C)
-                                        else:
-                                            sub_mgr.set_active_track(track.id, getattr(self, '_preview_player', None))
-                                            self._update_cc_button_state()
-                                            modal.destroy()
-                                    try:
-                                        self.after(0, _dl_ui)
-                                    except Exception:
-                                        pass
-                                sub_mgr.download_online_track_async(target_res, on_complete=_on_dl_done)
-                            return _dl
-
-                        ctk.CTkButton(
-                            card, text='Download & Use', width=110, height=28,
-                            fg_color=ACCENT, hover_color=ACCENT_HOVER,
-                            text_color=WHITE, corner_radius=4,
-                            font=(ui_font(), 10, 'bold'),
-                            command=_make_download_cmd()
-                        ).pack(side='right', padx=10, pady=8)
-
+                    status_lbl.configure(
+                        text=f"Found {len(_result_seen)} subtitle(s)",
+                        text_color=TEXT_DIM if _result_seen else ERROR_C)
                 try:
                     self.after(0, _ui_update)
                 except Exception:
                     pass
 
-            sub_mgr.search_online_async(q, language=lang_filter, provider_name=prov_filter, on_complete=_on_search_done)
+            sub_mgr.search_online_async(
+                q, language=lang_filter, provider_name=prov_filter,
+                on_progress=_on_search_progress, on_complete=_on_search_done)
 
-        search_btn = ctk.CTkButton(
-            query_frame, text=T('subtitle_search_btn'), width=75, height=32,
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=WHITE,
-            corner_radius=CONTROL_RADIUS, font=(ui_font(), 11, 'bold'),
-            command=_do_search
-        )
-        search_btn.pack(side='left')
+        query_entry.bind('<Return>', lambda e: _do_search())
 
-        # Trigger search immediately on opening modal
-        _do_search()
+        # Show the Available Subtitles tab by default
+        _show_tracks()
 
     def _find_video_by_url(self, url: str) -> dict:
         for video in getattr(self, '_videos', []):
@@ -3617,17 +4470,6 @@ class ModernApp(ctk.CTk):
             related = []
             seen = set()
             try:
-                from M3U8Sites.SiteMissAV import MissAVBrowser
-                for rv in MissAVBrowser.search(code) or []:
-                    if not isinstance(rv, dict):
-                        continue
-                    u = rv.get('url', '')
-                    if u and u not in seen:
-                        seen.add(u)
-                        related.append(rv)
-            except Exception:
-                pass
-            try:
                 from M3U8Sites.SiteSupJav import SupJavBrowser
                 for rv in SupJavBrowser.search(code) or []:
                     if not isinstance(rv, dict):
@@ -3641,6 +4483,23 @@ class ModernApp(ctk.CTk):
             if related:
                 self._preview_video['related_vids'] = related
 
+    def _preview_list(self, *keys):
+        """Collect unique, non-empty values across several metadata keys."""
+        v_dict = getattr(self, '_preview_video', {}) or {}
+        vals = []
+        for k in keys:
+            raw = v_dict.get(k)
+            if isinstance(raw, (list, tuple, set)):
+                for x in raw:
+                    s = str(x).strip()
+                    if s and s not in vals:
+                        vals.append(s)
+            else:
+                s = str(raw or '').strip()
+                if s and s not in vals:
+                    vals.append(s)
+        return vals
+
     def _preview_info_payload(self) -> dict:
         """Current values for the preview info card (shared by render + refresh)."""
         v_dict = getattr(self, '_preview_video', {}) or {}
@@ -3649,18 +4508,7 @@ class ModernApp(ctk.CTk):
         url = str(v_dict.get('url') or page_url or '')
 
         def _join(*keys):
-            vals = []
-            for k in keys:
-                raw = v_dict.get(k)
-                if isinstance(raw, (list, tuple, set)):
-                    for x in raw:
-                        s = str(x).strip()
-                        if s and s not in vals:
-                            vals.append(s)
-                else:
-                    s = str(raw or '').strip()
-                    if s and s not in vals:
-                        vals.append(s)
+            vals = self._preview_list(*keys)
             return ', '.join(vals) or 'N/A'
 
         actor_val = _join('actor', 'stars', 'star')
@@ -3692,6 +4540,48 @@ class ModernApp(ctk.CTk):
             'stream': stream_val,
         }
 
+    def _render_preview_chips(self, kind: str, items, urls=None):
+        """Render plain hoverable text links (actress / director / studio / tag)
+        in the info card. Hovering turns the text into the prime color; clicking
+        runs a quick search for everything the entity is part of."""
+        flow = (self._preview_chip_rows or {}).get(kind)
+        if flow is None or not flow.winfo_exists():
+            return
+        try:
+            for w in flow.winfo_children():
+                try:
+                    w.destroy()
+                except tk.TclError:
+                    pass
+        except tk.TclError:
+            return
+        if not items:
+            ctk.CTkLabel(
+                flow, text='N/A', text_color=TEXT_PRI,
+                font=(ui_font(), 11)).pack(side='left')
+            return
+        for idx, name in enumerate(items):
+            name = str(name).strip()
+            if not name:
+                continue
+            url = ''
+            if urls and idx < len(urls):
+                url = str(urls[idx] or '').strip()
+            link = ctk.CTkLabel(
+                flow, text=name, text_color=TEXT_PRI,
+                font=(ui_font(), 11))
+            link.pack(side='left', padx=(0, 10), pady=2)
+            try:
+                link.configure(cursor='hand2')
+            except Exception:
+                pass
+            link.bind('<Button-1>',
+                      lambda e, k=kind, n=name, u=url: self._open_entity_page(k, n, u))
+            link.bind('<Enter>',
+                      lambda e, w=link: w.configure(text_color=ACCENT))
+            link.bind('<Leave>',
+                      lambda e, w=link: w.configure(text_color=TEXT_PRI))
+
     def _refresh_preview_info(self):
         """Update the info card value labels and actress photo after enrichment."""
         if getattr(self, '_is_closing', False):
@@ -3702,7 +4592,7 @@ class ModernApp(ctk.CTk):
         if not labels:
             return
         payload = self._preview_info_payload()
-        for key in ('actor', 'actress', 'director', 'studio', 'tags', 'duration', 'format', 'url', 'stream'):
+        for key in ('actor', 'duration', 'format', 'url', 'stream'):
             lbl = labels.get(key)
             if lbl is None:
                 continue
@@ -3712,6 +4602,17 @@ class ModernApp(ctk.CTk):
                 lbl.configure(text=payload[key])
             except tk.TclError:
                 return
+
+        # Rebuild the clickable chips for actress / director / studio / tags.
+        self._render_preview_chips('actress',
+                                   self._preview_list('actress', 'actresses', 'model', 'models', 'cast'),
+                                   (self._preview_video or {}).get('actress_urls') or [])
+        self._render_preview_chips('director',
+                                   self._preview_list('director', 'directors'))
+        self._render_preview_chips('studio',
+                                   self._preview_list('studio', 'maker', 'publisher', 'production'))
+        self._render_preview_chips('tags',
+                                   self._preview_list('tags', 'categories', 'keywords'))
 
         photo_urls = (self._preview_video or {}).get('actress_photos') or []
         if not photo_urls:
@@ -3746,19 +4647,26 @@ class ModernApp(ctk.CTk):
             return
         names = [str(x).strip() for x in
                  ((self._preview_video or {}).get('actress') or []) if str(x).strip()]
+        actress_urls = [str(x).strip() for x in
+                        ((self._preview_video or {}).get('actress_urls') or []) if str(x).strip()]
 
         def _worker():
             if self._is_closing or gen != getattr(self, '_preview_gen', 0):
                 return
             results = []
-            for u in urls:
+            for i, u in enumerate(urls):
                 if self._is_closing or gen != getattr(self, '_preview_gen', 0):
                     return
                 img = _fetch_actress_portrait(u)
                 if img is not None:
-                    results.append(u)
+                    name = names[i] if i < len(names) else ''
+                    page_url = actress_urls[i] if i < len(actress_urls) else ''
+                    results.append((u, name, page_url))
             if not results:
                 return
+
+            def _open(n, pu):
+                self._open_entity_page('actress', n, pu)
 
             def _apply():
                 if self._is_closing or gen != getattr(self, '_preview_gen', 0):
@@ -3774,7 +4682,7 @@ class ModernApp(ctk.CTk):
                             return
                         self._preview_photos_shown = True
                     diameter = 88
-                    for u in results:
+                    for u, name, page_url in results:
                         if not scroll.winfo_exists():
                             return
                         img = _fetch_actress_portrait(u)
@@ -3792,12 +4700,25 @@ class ModernApp(ctk.CTk):
                             added = []
                             scroll._added_urls = added
                         added.append(u)
-                        if names:
-                            ctk.CTkLabel(
-                                holder, text=names[0], text_color=TEXT_DIM,
-                                font=(ui_font(), 9), wraplength=diameter, justify='center'
-                            ).pack(anchor='center', pady=(4, 0))
-                            names.pop(0)
+                        if name:
+                            try:
+                                lbl.configure(cursor='hand2')
+                            except Exception:
+                                pass
+                            lbl.bind('<Button-1>', lambda e, n=name, pu=page_url: _open(n, pu))
+                            name_lbl = ctk.CTkLabel(
+                                holder, text=name, text_color=TEXT_PRI,
+                                font=(ui_font(), 9), wraplength=diameter, justify='center')
+                            name_lbl.pack(anchor='center', pady=(4, 0))
+                            try:
+                                name_lbl.configure(cursor='hand2')
+                            except Exception:
+                                pass
+                            name_lbl.bind('<Button-1>', lambda e, n=name, pu=page_url: _open(n, pu))
+                            name_lbl.bind('<Enter>',
+                                          lambda e, w=name_lbl: w.configure(text_color=ACCENT))
+                            name_lbl.bind('<Leave>',
+                                          lambda e, w=name_lbl: w.configure(text_color=TEXT_PRI))
                 except Exception:
                     pass
 
@@ -3879,12 +4800,44 @@ class ModernApp(ctk.CTk):
                     v_thumb_holder, text=f' {v_dur} ', text_color=WHITE, fg_color='#000000',
                     corner_radius=3, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
 
+            # Subtitle-language outline badges — bottom-left of thumbnail
+            try:
+                _sub_cache = SubtitleCache()
+            except Exception:
+                _sub_cache = None
+            _sub_dest_var = getattr(self, '_dest_var', None)
+            _sub_dest = _sub_dest_var.get() if _sub_dest_var is not None else getattr(self, '_dest', '')
+            _sub_listing_url = getattr(self, '_current_base_url', '')
+            try:
+                sub_langs = _available_subtitle_langs(
+                    v_item, dest=_sub_dest, cache=_sub_cache,
+                    listing_url=_sub_listing_url)
+            except Exception:
+                sub_langs = ()
+            sub_badge_widgets = []
+            if sub_langs:
+                _bx = 5
+                for _lang in sub_langs:
+                    _color = _SUBTITLE_BADGE_COLORS.get(_lang, '#90A4AE')
+                    _badge = ctk.CTkLabel(
+                        v_thumb_holder, text=_lang,
+                        width=25, height=16, corner_radius=0,
+                        border_width=1, border_color=_color,
+                        fg_color=('#101018', '#101018'), text_color=_color,
+                        font=('Consolas', 8, 'bold'))
+                    _badge.place(relx=0, rely=1.0, anchor='sw', x=_bx, y=-4)
+                    _badge.lift()
+                    sub_badge_widgets.append(_badge)
+                    _bx += 29
+
             v_info = ctk.CTkFrame(v_card, fg_color='transparent')
             v_info.pack(fill='x', padx=8, pady=(6, 8))
 
-            ctk.CTkLabel(
+            v_title_lbl = ctk.CTkLabel(
                 v_info, text=v_title, text_color=TEXT_PRI,
-                font=(ui_font(), 10, 'bold'), wraplength=220, justify='left', anchor='w').pack(anchor='w', fill='x', pady=(0, 4))
+                font=(ui_font(), 10, 'bold'), wraplength=220, justify='left', anchor='w')
+            v_title_lbl.pack(anchor='w', fill='x', pady=(0, 4))
+            ToolTip(v_title_lbl, v_title)
 
             v_badges = ctk.CTkFrame(v_info, fg_color='transparent')
             v_badges.pack(anchor='w', fill='x')
@@ -3918,6 +4871,8 @@ class ModernApp(ctk.CTk):
             _bind_v(v_thumb_holder)
             _bind_v(v_lbl)
             _bind_v(v_info)
+            for _bw in sub_badge_widgets:
+                _bind_v(_bw)
 
     def _enrich_category_tags(self, cat_grid, gen):
         """Fetch tags for a bounded set of category candidates in the background,
@@ -4138,6 +5093,23 @@ class ModernApp(ctk.CTk):
             corner_radius=4, height=22, padx=8,
             font=(ui_font(), 10)).pack(side='left')
 
+        try:
+            preview_vid = dict(getattr(self, '_preview_video', None) or {})
+            preview_vid['url'] = preview_vid.get('url') or source.page_url
+            preview_vid['title'] = preview_vid.get('title') or source.title
+            _sub_dest_var = getattr(self, '_dest_var', None)
+            _sub_dest = _sub_dest_var.get() if _sub_dest_var is not None else getattr(self, '_dest', '')
+            sub_langs = _available_subtitle_langs(preview_vid, dest=_sub_dest)
+            for _lang in sub_langs:
+                _color = _SUBTITLE_BADGE_COLORS.get(_lang, '#90A4AE')
+                ctk.CTkLabel(
+                    badges, text=f'{_lang} SUB', text_color=_color,
+                    fg_color=('#101018', '#101018'), border_width=1, border_color=_color,
+                    corner_radius=0, height=22, padx=8,
+                    font=('Consolas', 10, 'bold')).pack(side='left', padx=(6, 0))
+        except Exception:
+            pass
+
         url = source.page_url or (self._preview_video or {}).get('url', '')
 
         # Automatically record view history
@@ -4302,6 +5274,18 @@ class ModernApp(ctk.CTk):
         desc_box.grid(row=0, column=0, sticky='nsew')
 
         self._preview_info_labels = {}
+        self._preview_chip_rows = {}
+
+        def _chips_row(label, kind, items, urls=None):
+            r = ctk.CTkFrame(desc_box, fg_color='transparent')
+            r.pack(fill='x', pady=4)
+            ctk.CTkLabel(
+                r, text=label, text_color=TEXT_DIM,
+                font=(ui_font(), 11, 'bold'), width=120, anchor='w').pack(side='left')
+            flow = ctk.CTkFrame(r, fg_color='transparent')
+            flow.pack(side='left', fill='x', expand=True)
+            self._preview_chip_rows[kind] = flow
+            self._render_preview_chips(kind, items, urls)
 
         def _desc_row(label, val, can_copy=False, key=''):
             r = ctk.CTkFrame(desc_box, fg_color='transparent')
@@ -4333,10 +5317,15 @@ class ModernApp(ctk.CTk):
         # Metadata fields: Actor, Actress, Director, Studio, Tags, Duration, Format, URL
         payload = self._preview_info_payload()
         _desc_row('Actor:', payload['actor'], key='actor')
-        _desc_row('Actress:', payload['actress'], key='actress')
-        _desc_row('Director:', payload['director'], key='director')
-        _desc_row('Studio:', payload['studio'], key='studio')
-        _desc_row('Tags:', payload['tags'], key='tags')
+        _chips_row('Actress:', 'actress',
+                   self._preview_list('actress', 'actresses', 'model', 'models', 'cast'),
+                   (self._preview_video or {}).get('actress_urls') or [])
+        _chips_row('Director:', 'director',
+                   self._preview_list('director', 'directors'))
+        _chips_row('Studio:', 'studio',
+                   self._preview_list('studio', 'maker', 'publisher', 'production'))
+        _chips_row('Tags:', 'tags',
+                   self._preview_list('tags', 'categories', 'keywords'))
         _desc_row('Duration:', payload['duration'], key='duration')
         _desc_row('Media Format:', payload['format'], key='format')
         _desc_row('Page URL:', payload['url'], can_copy=True, key='url')
@@ -4634,7 +5623,7 @@ class ModernApp(ctk.CTk):
     def _build_update_card(self, content):
         upd = ctk.CTkFrame(content, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
                            border_width=1, border_color=BORDER_CARD)
-        upd.pack(fill='x', pady=(0, 16))
+        upd.pack(fill='x', pady=(0, 16), padx=(0, 18))
 
         upd_hdr = ctk.CTkFrame(upd, fg_color='transparent')
         upd_hdr.pack(fill='x', padx=20, pady=(16, 12))
@@ -4720,9 +5709,73 @@ class ModernApp(ctk.CTk):
         def render_update_page(container):
             self._build_update_card(container)
 
+        def render_general_page(container):
+            grp = ctk.CTkFrame(container, fg_color='transparent')
+            grp.pack(fill='both', expand=True, padx=(0, 18))
+
+            grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
+            grp_hdr.pack(fill='x', pady=(0, 8))
+            ctk.CTkLabel(grp_hdr, text=T('general_settings_title'),
+                         font=(ui_font(), 15, 'bold'),
+                         text_color=TEXT_PRI).pack(side='left')
+
+            ctk.CTkFrame(grp, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 14))
+
+            # Theme Selection (System Theme, Dark Theme, Light Theme)
+            row_theme = ctk.CTkFrame(grp, fg_color='transparent')
+            row_theme.pack(fill='x', pady=(2, 1))
+            ctk.CTkLabel(row_theme, text=T('theme_setting_title'), text_color=TEXT_PRI,
+                         font=(ui_font(), 12, 'bold'), width=130,
+                         anchor='w').pack(side='left')
+
+            self._theme_var = ctk.StringVar(value=self._theme_display_name(self._theme_mode))
+            self._theme_menu = ctk.CTkOptionMenu(
+                row_theme,
+                values=['System Theme', 'Dark Theme', 'Light Theme'],
+                variable=self._theme_var,
+                command=self._on_theme_select,
+                width=160, height=36,
+                corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11))
+            self._theme_menu.pack(side='left', padx=10)
+
+            ctk.CTkLabel(grp, text=T('theme_setting_desc'),
+                         text_color=TEXT_DIM,
+                         font=(ui_font(), 10)).pack(anchor='w', padx=(140, 0), pady=(0, 14))
+
+            # Language Selection
+            row_lang = ctk.CTkFrame(grp, fg_color='transparent')
+            row_lang.pack(fill='x', pady=(2, 1))
+            ctk.CTkLabel(row_lang, text=T('language_setting_title'), text_color=TEXT_PRI,
+                         font=(ui_font(), 12, 'bold'), width=130,
+                         anchor='w').pack(side='left')
+
+            self._lang_var = ctk.StringVar(value=self._lang_name_by_code.get(get_lang(), 'English'))
+            self._lang_menu = ctk.CTkOptionMenu(
+                row_lang,
+                values=[name for _, name in LANGUAGES],
+                variable=self._lang_var,
+                command=self._on_lang_change,
+                width=160, height=36,
+                corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11))
+            self._lang_menu.pack(side='left', padx=10)
+
+            ctk.CTkLabel(grp, text=T('language_setting_desc'),
+                         text_color=TEXT_DIM,
+                         font=(ui_font(), 10)).pack(anchor='w', padx=(140, 0), pady=(0, 14))
+
         def render_download_page(container):
             grp = ctk.CTkFrame(container, fg_color='transparent')
-            grp.pack(fill='both', expand=True)
+            grp.pack(fill='both', expand=True, padx=(0, 18))
 
             grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
             grp_hdr.pack(fill='x', pady=(0, 8))
@@ -4840,7 +5893,7 @@ class ModernApp(ctk.CTk):
 
         def render_proxy_page(container):
             proxy = ctk.CTkFrame(container, fg_color='transparent')
-            proxy.pack(fill='both', expand=True)
+            proxy.pack(fill='both', expand=True, padx=(0, 18))
 
             proxy_hdr = ctk.CTkFrame(proxy, fg_color='transparent')
             proxy_hdr.pack(fill='x', pady=(0, 8))
@@ -4894,7 +5947,7 @@ class ModernApp(ctk.CTk):
 
         def render_subtitle_page(container):
             grp = ctk.CTkFrame(container, fg_color='transparent')
-            grp.pack(fill='both', expand=True)
+            grp.pack(fill='both', expand=True, padx=(0, 18))
 
             grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
             grp_hdr.pack(fill='x', pady=(0, 8))
@@ -4982,9 +6035,84 @@ class ModernApp(ctk.CTk):
                 justify='left', anchor='w').pack(
                     anchor='w', padx=(140, 20), pady=(0, 4))
 
+            # Pre-download local models
+            row_prefetch = ctk.CTkFrame(grp, fg_color='transparent')
+            row_prefetch.pack(fill='x', pady=(10, 1))
+            self._subtitle_prefetch_btn = ctk.CTkButton(
+                row_prefetch, text=T('subtitle_prefetch_button'),
+                width=86, height=32, corner_radius=8,
+                fg_color='transparent', border_width=1,
+                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, font=(ui_font(), 10, 'bold'),
+                command=self._prefetch_subtitle_models)
+            self._subtitle_prefetch_btn.pack(side='left', padx=(140, 10))
+            self._subtitle_prefetch_status = ctk.CTkLabel(
+                row_prefetch, text='', text_color=TEXT_SEC,
+                font=(ui_font(), 10), anchor='w')
+            self._subtitle_prefetch_status.pack(
+                side='left', fill='x', expand=True)
+            if getattr(self, '_subtitle_prefetching', False):
+                self._subtitle_prefetch_btn.configure(state='disabled')
+            self._subtitle_prefetch_status.configure(
+                text=getattr(self, '_subtitle_prefetch_status_text', ''))
+            ctk.CTkLabel(
+                grp, text=T('subtitle_prefetch_desc'),
+                text_color=TEXT_DIM,
+                font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w').pack(
+                    anchor='w', padx=(140, 20), pady=(0, 4))
+
+            # Remove all downloaded subtitles
+            row_clear_subs = ctk.CTkFrame(grp, fg_color='transparent')
+            row_clear_subs.pack(fill='x', pady=(10, 1))
+            self._subtitle_clear_btn = ctk.CTkButton(
+                row_clear_subs, text=T('clear_downloaded_subtitles_button'),
+                width=110, height=32, corner_radius=8,
+                fg_color='transparent', border_width=1,
+                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=ACCENT, font=(ui_font(), 10, 'bold'),
+                command=self._remove_all_downloaded_subtitles)
+            self._subtitle_clear_btn.pack(side='left', padx=(140, 10))
+            self._subtitle_clear_status = ctk.CTkLabel(
+                row_clear_subs, text='', text_color=TEXT_SEC,
+                font=(ui_font(), 10), anchor='w')
+            self._subtitle_clear_status.pack(
+                side='left', fill='x', expand=True)
+            self._update_subtitle_cache_status()
+            ctk.CTkLabel(
+                grp, text=T('clear_downloaded_subtitles_desc'),
+                text_color=TEXT_DIM,
+                font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w').pack(
+                    anchor='w', padx=(140, 20), pady=(0, 4))
+
+            # Notice / Important Guidance Card
+            notice_card = ctk.CTkFrame(
+                grp, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+                border_width=1, border_color=BORDER_CARD
+            )
+            notice_card.pack(fill='x', pady=(14, 6))
+
+            notice_inner = ctk.CTkFrame(notice_card, fg_color='transparent')
+            notice_inner.pack(fill='x', padx=16, pady=12)
+
+            ctk.CTkLabel(
+                notice_inner, text=T('subtitle_notice_title'),
+                font=(ui_font(), 11, 'bold'), text_color=TEXT_PRI, anchor='w'
+            ).pack(anchor='w', pady=(0, 6))
+
+            ctk.CTkLabel(
+                notice_inner, text=T('subtitle_notice_desc'),
+                text_color=TEXT_SEC, font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP - 30,
+                justify='left', anchor='w'
+            ).pack(anchor='w')
+
         def render_cf_page(container):
             cf = ctk.CTkFrame(container, fg_color='transparent')
-            cf.pack(fill='both', expand=True)
+            cf.pack(fill='both', expand=True, padx=(0, 18))
 
             cf_hdr = ctk.CTkFrame(cf, fg_color='transparent')
             cf_hdr.pack(fill='x', pady=(0, 8))
@@ -5064,7 +6192,7 @@ class ModernApp(ctk.CTk):
 
         def render_queue_page(container):
             box = ctk.CTkFrame(container, fg_color='transparent')
-            box.pack(fill='both', expand=True)
+            box.pack(fill='both', expand=True, padx=(0, 18))
 
             ctk.CTkLabel(box, text=T('queue_settings_title') if 'queue_settings_title' in T.__code__.co_varnames else 'Save Download Queue',
                          font=(ui_font(), 15, 'bold'), text_color=TEXT_PRI).pack(anchor='w')
@@ -5101,10 +6229,29 @@ class ModernApp(ctk.CTk):
 
         def render_about_page(container):
             box = ctk.CTkFrame(container, fg_color='transparent')
-            box.pack(fill='both', expand=True)
-            ctk.CTkLabel(box, text="FetchJAV", font=(ui_font(), 18, 'bold'), text_color=ACCENT).pack(anchor='w')
-            ctk.CTkLabel(box, text="Modern High-Speed JAV Downloader", text_color=TEXT_SEC, font=(ui_font(), 11)).pack(anchor='w', pady=(2, 12))
-            ctk.CTkFrame(box, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 14))
+            box.pack(fill='both', expand=True, padx=(0, 18))
+
+            hdr_row = ctk.CTkFrame(box, fg_color='transparent')
+            hdr_row.pack(anchor='w', fill='x', pady=(0, 4))
+
+            logo_p = os.path.join(os.path.dirname(__file__), 'logo.png')
+            if not os.path.exists(logo_p):
+                logo_p = os.path.join(os.path.dirname(__file__), 'img', 'logo.png')
+            if os.path.exists(logo_p):
+                try:
+                    about_logo_pil = Image.open(logo_p)
+                    about_logo_img = ctk.CTkImage(
+                        light_image=about_logo_pil, dark_image=about_logo_pil, size=(44, 44))
+                    ctk.CTkLabel(hdr_row, image=about_logo_img, text='').pack(side='left', padx=(0, 12))
+                except Exception:
+                    pass
+
+            text_col = ctk.CTkFrame(hdr_row, fg_color='transparent')
+            text_col.pack(side='left', fill='y')
+            ctk.CTkLabel(text_col, text="FetchJAV", font=(ui_font(), 18, 'bold'), text_color=ACCENT).pack(anchor='w')
+            ctk.CTkLabel(text_col, text="Modern High-Speed JAV Downloader", text_color=TEXT_SEC, font=(ui_font(), 11)).pack(anchor='w', pady=(2, 0))
+
+            ctk.CTkFrame(box, height=1, fg_color=BORDER).pack(fill='x', pady=(12, 14))
             ctk.CTkLabel(box, text="• Supports JableTV, MissAV & SupJav", text_color=TEXT_PRI, font=(ui_font(), 11)).pack(anchor='w', pady=2)
             ctk.CTkLabel(box, text="• Multi-threaded chunk downloading & Whisper auto-subtitles", text_color=TEXT_PRI, font=(ui_font(), 11)).pack(anchor='w', pady=2)
 
@@ -5113,7 +6260,7 @@ class ModernApp(ctk.CTk):
                 w.destroy()
 
             grp = ctk.CTkFrame(container, fg_color='transparent')
-            grp.pack(fill='both', expand=True)
+            grp.pack(fill='both', expand=True, padx=(0, 18))
 
             grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
             grp_hdr.pack(fill='x', pady=(0, 8))
@@ -5178,10 +6325,12 @@ class ModernApp(ctk.CTk):
                         font=(ui_font(), 9, 'bold')
                     ).pack(side='left', padx=(0, 6))
 
-                ctk.CTkLabel(
+                saved_title_lbl = ctk.CTkLabel(
                     title_row, text=title, text_color=TEXT_PRI,
                     font=(ui_font(), 12, 'bold'), anchor='w', wraplength=350, justify='left'
-                ).pack(side='left', fill='x', expand=True)
+                )
+                saved_title_lbl.pack(side='left', fill='x', expand=True)
+                ToolTip(saved_title_lbl, title)
 
                 if duration or url:
                     sub_info = duration if duration else url
@@ -5241,7 +6390,7 @@ class ModernApp(ctk.CTk):
             dl_hist = config.get_download_history()
 
             scroll = ctk.CTkFrame(container, fg_color='transparent')
-            scroll.pack(fill='both', expand=True)
+            scroll.pack(fill='both', expand=True, padx=(0, 18))
 
             trash_icon = None
             img_dir_dest = os.path.join(os.path.dirname(__file__), 'img')
@@ -5295,7 +6444,7 @@ class ModernApp(ctk.CTk):
                 hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
                 font=(ui_font(), 10), command=_clear_active
             )
-            clear_btn.pack(side='right', padx=(8, 0))
+            clear_btn.pack(side='right', padx=(8, 6))
 
             dl_btn = ctk.CTkButton(
                 tab_bar, text=T('recent_download_history'), width=180, height=32,
@@ -5325,7 +6474,7 @@ class ModernApp(ctk.CTk):
                     site_name = item.get('site_name') or ''
 
                     row = ctk.CTkFrame(card1, fg_color='transparent')
-                    row.pack(fill='x', expand=True, padx=12, pady=8)
+                    row.pack(fill='x', expand=True, padx=(12, 16), pady=8)
 
                     left_f = ctk.CTkFrame(row, fg_color='transparent')
                     left_f.pack(side='left', fill='both', expand=True)
@@ -5335,9 +6484,11 @@ class ModernApp(ctk.CTk):
                             left_f, text=f"[{site_name}]", text_color=ACCENT,
                             font=(ui_font(), 10, 'bold')).pack(side='left', padx=(0, 8))
 
-                    ctk.CTkLabel(
+                    v_hist_lbl = ctk.CTkLabel(
                         left_f, text=title, text_color=TEXT_PRI,
-                        font=(ui_font(), 11), anchor='w', wraplength=520, justify='left').pack(side='left', fill='x', expand=True)
+                        font=(ui_font(), 11), anchor='w', wraplength=460, justify='left')
+                    v_hist_lbl.pack(side='left', fill='x', expand=True)
+                    ToolTip(v_hist_lbl, title)
 
                     right_f = ctk.CTkFrame(row, fg_color='transparent')
                     right_f.pack(side='right', fill='y', padx=(8, 0))
@@ -5356,7 +6507,7 @@ class ModernApp(ctk.CTk):
                         border_width=1, border_color=BORDER_HOVER,
                         hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
                         font=(ui_font(), 10), command=_open_hist_item
-                    ).pack(side='left', padx=(0, 4))
+                    ).pack(side='left', padx=(0, 6))
 
                     ctk.CTkButton(
                         right_f, text='', height=26, width=32,
@@ -5364,7 +6515,7 @@ class ModernApp(ctk.CTk):
                         border_width=1, border_color=BORDER_HOVER,
                         hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
                         image=trash_icon, command=_remove_view_item
-                    ).pack(side='left')
+                    ).pack(side='left', padx=(0, 2))
 
                     if idx < len(v_hist[:30]) - 1:
                         ctk.CTkFrame(card1, height=1, fg_color=BORDER_CARD).pack(fill='x', padx=12)
@@ -5385,7 +6536,7 @@ class ModernApp(ctk.CTk):
                     state = state_label(item.get('state') or 'DOWNLOADED')
 
                     row = ctk.CTkFrame(card2, fg_color='transparent')
-                    row.pack(fill='x', expand=True, padx=12, pady=8)
+                    row.pack(fill='x', expand=True, padx=(12, 16), pady=8)
 
                     left_f = ctk.CTkFrame(row, fg_color='transparent')
                     left_f.pack(side='left', fill='both', expand=True)
@@ -5394,20 +6545,22 @@ class ModernApp(ctk.CTk):
                         left_f, text=f"[{state}]", text_color=SUCCESS,
                         font=(ui_font(), 10, 'bold')).pack(side='left', padx=(0, 8))
 
-                    ctk.CTkLabel(
+                    dl_hist_lbl = ctk.CTkLabel(
                         left_f, text=name, text_color=TEXT_PRI,
-                        font=(ui_font(), 11), anchor='w', wraplength=400, justify='left').pack(side='left', fill='x', expand=True)
+                        font=(ui_font(), 11), anchor='w', wraplength=420, justify='left')
+                    dl_hist_lbl.pack(side='left', fill='x', expand=True)
+                    ToolTip(dl_hist_lbl, name)
 
                     right_f = ctk.CTkFrame(row, fg_color='transparent')
                     right_f.pack(side='right', fill='y', padx=(8, 0))
 
                     def _locate_dl_item(target_dest=dest, target_name=name):
                         if not target_dest:
-                            messagebox.showinfo('Locate', 'No destination folder recorded for this item.')
+                            messagebox.showinfo(T('locate_title'), T('locate_no_folder'))
                             return
                         folder = os.path.abspath(target_dest)
                         if not os.path.isdir(folder):
-                            messagebox.showinfo('Locate', 'Destination folder no longer exists.')
+                            messagebox.showinfo(T('locate_title'), T('locate_folder_missing'))
                             return
                         expected = os.path.join(folder, target_name + '.mp4')
                         if os.path.exists(expected):
@@ -5423,19 +6576,19 @@ class ModernApp(ctk.CTk):
                             except OSError as e:
                                 messagebox.showerror(T('open_folder_failed_title'), str(e))
                         else:
-                            messagebox.showinfo('Locate', 'File is not present in the destination folder.')
+                            messagebox.showinfo(T('locate_title'), T('locate_file_missing'))
 
                     def _remove_dl_item(target_url=url):
                         config.remove_download_history(target_url)
                         render_history_page(container)
 
                     ctk.CTkButton(
-                        right_f, text='Locate', height=26, width=60,
+                        right_f, text=T('locate_title'), height=26, width=60,
                         corner_radius=CONTROL_RADIUS, fg_color='transparent',
                         border_width=1, border_color=BORDER_HOVER,
                         hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
                         font=(ui_font(), 10), command=_locate_dl_item
-                    ).pack(side='left', padx=(0, 4))
+                    ).pack(side='left', padx=(0, 6))
 
                     ctk.CTkButton(
                         right_f, text='', height=26, width=32,
@@ -5443,7 +6596,7 @@ class ModernApp(ctk.CTk):
                         border_width=1, border_color=BORDER_HOVER,
                         hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
                         image=trash_icon, command=_remove_dl_item
-                    ).pack(side='left')
+                    ).pack(side='left', padx=(0, 2))
 
                     if idx < len(dl_hist[:30]) - 1:
                         ctk.CTkFrame(card2, height=1, fg_color=BORDER_CARD).pack(fill='x', padx=12)
@@ -5452,9 +6605,10 @@ class ModernApp(ctk.CTk):
             dl_content.pack_forget()
 
         self._settings_page_renderers = {
+            'update': render_update_page,
+            'general': render_general_page,
             'saved': render_saved_page,
             'history': render_history_page,
-            'update': render_update_page,
             'subtitle': render_subtitle_page,
             'download': render_download_page,
             'proxy': render_proxy_page,
@@ -5466,6 +6620,7 @@ class ModernApp(ctk.CTk):
         # Navigation Categories
         self._settings_categories = [
             ('update', '', T('update_settings_title') if 'update_settings_title' in T.__code__.co_varnames else 'Update'),
+            ('general', '', T('general_settings_title') if 'general_settings_title' in T.__code__.co_varnames else 'General'),
             ('saved', '', T('saved_settings_title') if 'saved_settings_title' in T.__code__.co_varnames else 'Saved'),
             ('history', '', T('history_settings_title')),
             ('download', '', T('download_settings')),
@@ -5522,6 +6677,13 @@ class ModernApp(ctk.CTk):
         renderer = getattr(self, '_settings_page_renderers', {}).get(selected_cat)
         if renderer:
             renderer(pane)
+
+        try:
+            pane._parent_canvas.yview_moveto(0)
+            pane.update_idletasks()
+            pane._parent_canvas.configure(scrollregion=pane._parent_canvas.bbox("all"))
+        except Exception:
+            pass
 
     def _load_categories(self):
         if self._is_closing:
@@ -5590,12 +6752,18 @@ class ModernApp(ctk.CTk):
             self._cat_var.set(names[0])
 
     def _load_page(self):
+        if getattr(self, '_search_all_active', False) and getattr(self, '_search_all_query', ''):
+            self._load_page_all_sites()
+            return
         if not self._current_base_url:
             return
         self._page_req += 1
         my_req = self._page_req
         my_gen = self._build_gen
-        site_key = self._site_key
+        # Entity pages (all of an actress/director/studio/tag's work) may fall
+        # back to a different site's search, so use that site's browser and
+        # pagination while an entity page is active.
+        site_key = getattr(self, '_entity_site_key', '') or self._site_key
         browser = SITES[site_key]['browser']
         base = self._current_base_url
         page_snapshot = self._page
@@ -5623,6 +6791,67 @@ class ModernApp(ctk.CTk):
 
         threading.Thread(target=_fetch, daemon=True).start()
 
+    def _search_all_page_url(self, site_key: str, query: str, page: int) -> str:
+        """Build a paginated search URL for one site in Search From All mode."""
+        from urllib.parse import quote
+        if site_key == 'JableTV':
+            base = f'https://jable.tv/search/{query}/'
+            if page <= 1:
+                return base
+            return f'{base.rstrip("/")}/?from={page}'
+        if site_key == 'SupJav':
+            base = SupJavBrowser.search_url(query, lang=T('supjav_lang'))
+            return SupJavBrowser.page_url(base, page)
+        lang = T('missav_lang')
+        eq = quote(query, safe='')
+        base = f'https://missav.ai/{lang}/search/{eq}' if lang else f'https://missav.ai/search/{eq}'
+        return MissAVBrowser.page_url(base, page)
+
+    def _load_page_all_sites(self):
+        """Search From All: fetch the same query from every site in parallel and
+        merge the results into one page, tagging each video with its source site."""
+        query = self._search_all_query
+        page_snapshot = self._page
+        my_req = self._page_req
+        my_gen = self._build_gen
+        lock = threading.Lock()
+        merged: list[dict] = []
+        blocked = False
+
+        def _fetch(site_key: str, url: str):
+            nonlocal blocked
+            try:
+                data = fetch_page_data(SITES[site_key]['browser'], url)
+                videos = data.get('videos', [])
+            except MirrorsBlockedError:
+                videos = []
+                blocked = True
+            for v in videos:
+                v['site'] = site_key
+            with lock:
+                merged.extend(videos)
+
+        threads = []
+        for site_key in _ALL_SITE_KEYS:
+            try:
+                url = self._search_all_page_url(site_key, query, page_snapshot)
+            except Exception:
+                continue
+            if not url:
+                continue
+            t = threading.Thread(target=_fetch, args=(site_key, url), daemon=True)
+            t.start()
+            threads.append(t)
+
+        def _wait():
+            for t in threads:
+                t.join()
+            self._ui(
+                lambda: self._apply_page(my_req, merged, page_snapshot, blocked, my_gen),
+                gen=my_gen)
+
+        threading.Thread(target=_wait, daemon=True).start()
+
     def _apply_page(self, req: int, videos: list[dict], page_snapshot: int,
                     blocked: bool = False, gen: int | None = None):
         if self._is_closing or req != self._page_req:
@@ -5634,6 +6863,20 @@ class ModernApp(ctk.CTk):
             self._has_next = False
             self._page_lbl.configure(text=T('page_n', n=self._page))
             return
+        if (not videos and page_snapshot == 1 and not blocked
+                and getattr(self, '_entity_search_pending', False)):
+            # The current entity URL came back empty — retry with the next
+            # candidate (a search by an alternate name spelling or on a
+            # different site) so the user still sees every matching title.
+            remaining = getattr(self, '_entity_candidates', [])[1:]
+            self._entity_candidates = remaining
+            if remaining:
+                self._current_base_url = remaining[0][0]
+                self._entity_site_key = remaining[0][1]
+                self._refresh_entity_heading()
+                self._load_page()
+                return
+            self._entity_search_pending = False
         self._videos = videos
         self._browse_blocked = blocked
         self._browse_empty_message = ''
@@ -5652,10 +6895,10 @@ class ModernApp(ctk.CTk):
         path = url_l.split('?', 1)[0].rstrip('/')
         if ('uncensored-leak' in url_l or '無碼' in title_l or
                 '无码' in title_l or 'uncensored' in title_l):
-            return '無碼', '#C2410C'
+            return T('badge_uncensored'), '#C2410C'
         if ('chinese-subtitle' in url_l or path.endswith('-c') or
                 '-c/' in url_l or '中文字幕' in title_l or '中字' in title_l):
-            return '中字', '#0E7490'
+            return T('badge_chinese_sub'), '#0E7490'
         return None
 
     def _refresh_grid(self):
@@ -5689,6 +6932,17 @@ class ModernApp(ctk.CTk):
             200, int((max(logical_width, 750) - 240) / columns) - 24)
         self._last_estimated_cw = estimated_card_width
         title_wrap = max(160, min(330, estimated_card_width - 34))
+
+        # Reuse one subtitle-cache handle and current dest folder for the
+        # per-card language badge lookups in this render pass.
+        try:
+            _sub_cache = SubtitleCache()
+        except Exception:
+            _sub_cache = None
+        _sub_dest_var = getattr(self, '_dest_var', None)
+        _sub_dest = _sub_dest_var.get() if _sub_dest_var is not None else getattr(self, '_dest', '')
+        _sub_listing_url = getattr(self, '_current_base_url', '')
+
         row_frame = None
         for i, v in enumerate(self._videos):
             col_idx = i % columns
@@ -5733,17 +6987,59 @@ class ModernApp(ctk.CTk):
                                         font=('Consolas', 8, 'bold'))
                 dur_lbl.place(relx=1.0, rely=1.0, anchor='se', x=-6, y=-6)
 
+            # Subtitle-language outline badges — bottom-left of thumbnail
+            try:
+                sub_langs = _available_subtitle_langs(
+                    v, dest=_sub_dest, cache=_sub_cache,
+                    listing_url=_sub_listing_url)
+            except Exception:
+                sub_langs = ()
+            sub_badge_widgets = []
+            if sub_langs:
+                _bx = 7
+                for _lang in sub_langs:
+                    _color = _SUBTITLE_BADGE_COLORS.get(_lang, '#90A4AE')
+                    _badge_lbl = ctk.CTkLabel(
+                        thumb_holder, text=_lang,
+                        width=25, height=16, corner_radius=0,
+                        border_width=1, border_color=_color,
+                        fg_color=('#101018', '#101018'), text_color=_color,
+                        font=('Consolas', 8, 'bold'))
+                    _badge_lbl.place(relx=0, rely=1.0, anchor='sw',
+                                     x=_bx, y=-7)
+                    _badge_lbl.lift()
+                    sub_badge_widgets.append(_badge_lbl)
+                    _bx += 29
+
+            # Source-site label — dull chip top-left of the thumbnail, shown on
+            # Search From All results so each site's results are distinguishable.
+            site_lbl = None
+            src_site = (v.get('site') or '').strip()
+            if src_site:
+                site_lbl = ctk.CTkLabel(
+                    thumb_holder, text=f' {src_site} ',
+                    height=17, corner_radius=4,
+                    fg_color=('#0C0C11', '#0C0C11'),
+                    text_color=('#9A938D', '#8B847E'),
+                    font=('Consolas', 8, 'bold'))
+                site_lbl.place(relx=0, rely=0, anchor='nw', x=7, y=7)
+                site_lbl.lift()
+
             # ── Title (clean 2-line max) ──
             title_text = title[:65] + '…' if len(title) > 65 else title
-            ctk.CTkLabel(card, text=title_text, text_color=TEXT_PRI,
+            title_lbl = ctk.CTkLabel(card, text=title_text, text_color=TEXT_PRI,
                          font=(ui_font(), 11),
                          wraplength=title_wrap, justify='left',
-                         anchor='nw').pack(
-                             fill='x', padx=10, pady=(7, 5), anchor='w')
+                         anchor='nw')
+            title_lbl.pack(fill='x', padx=10, pady=(7, 5), anchor='w')
+            ToolTip(title_lbl, title)
 
             # ── Action buttons: Save (heart) · Preview · Select (inline) ──
             bottom = ctk.CTkFrame(card, fg_color='transparent')
             bottom.pack(fill='x', padx=8, pady=(0, 9))
+            bottom.grid_columnconfigure(0, weight=0, minsize=30)
+            bottom.grid_columnconfigure(1, weight=1, uniform='card_actions')
+            bottom.grid_columnconfigure(2, weight=1, uniform='card_actions')
 
             is_card_saved = config.is_video_saved(url)
             card_heart_img = getattr(self, '_heart_active_icon', None) if is_card_saved else getattr(self, '_heart_icon', None)
@@ -5760,7 +7056,7 @@ class ModernApp(ctk.CTk):
                 text_color=ACCENT if is_card_saved else TEXT_PRI,
                 command=lambda video=v, u=url: self._on_card_heart_click(video, u)
             )
-            card_heart_btn.pack(side='left', padx=(0, 4))
+            card_heart_btn.grid(row=0, column=0, padx=(0, 4))
 
             preview_btn = ctk.CTkButton(
                 bottom, text=T('preview'), height=30,
@@ -5773,7 +7069,7 @@ class ModernApp(ctk.CTk):
                 font=(ui_font(), 10),
                 command=lambda video=v: self._open_preview(video)
             )
-            preview_btn.pack(side='left', fill='x', expand=True, padx=(0, 4))
+            preview_btn.grid(row=0, column=1, sticky='ew', padx=(0, 4))
 
             sel_text = ('✓ ' + T('selected')) if is_sel else T('select')
             sel_btn = ctk.CTkButton(
@@ -5787,9 +7083,24 @@ class ModernApp(ctk.CTk):
                 font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10),
                 command=lambda u=url: self._toggle_select(u)
             )
-            sel_btn.pack(side='left', fill='x', expand=True, padx=(0, 0))
+            sel_btn.grid(row=0, column=2, sticky='ew')
 
-            self._card_widgets[url] = {'card': card, 'sel_btn': sel_btn, 'preview_btn': preview_btn, 'heart_btn': card_heart_btn}
+            # Keep all inline button labels readable at any card width.
+            def _adapt_action_fonts(_event=None, card_url=url):
+                try:
+                    if not preview_btn.winfo_exists() or not sel_btn.winfo_exists():
+                        return
+                    is_now_sel = card_url in self._selected_urls
+                    cur_sel_text = ('✓ ' + T('selected')) if is_now_sel else T('select')
+                    preview_btn.configure(
+                        font=_fit_card_button_font(T('preview'), preview_btn.winfo_width(), 10))
+                    sel_btn.configure(
+                        font=_fit_card_button_font(cur_sel_text, sel_btn.winfo_width(), 10, is_now_sel))
+                except Exception:
+                    pass
+            bottom.bind('<Configure>', _adapt_action_fonts, add='+')
+
+            self._card_widgets[url] = {'card': card, 'sel_btn': sel_btn, 'preview_btn': preview_btn, 'heart_btn': card_heart_btn, 'adapt_fonts': _adapt_action_fonts}
 
             # Clickable card
             def _bind_click(widget, video_url=url):
@@ -5798,11 +7109,15 @@ class ModernApp(ctk.CTk):
             _bind_click(card)
             _bind_click(thumb_holder)
             _bind_click(thumb_lbl)
+            for _bw in sub_badge_widgets:
+                _bind_click(_bw)
+            if site_lbl is not None:
+                _bind_click(site_lbl)
 
             # Background thumbnail load
             if thumb_url:
                 self._load_thumb_async(
-                    thumb_url, thumb_lbl, gen, build_gen, self._site_key)
+                    thumb_url, thumb_lbl, gen, build_gen, src_site or self._site_key)
             else:
                 thumb_lbl.configure(text=T('no_thumbnail'))
 
@@ -5913,8 +7228,10 @@ class ModernApp(ctk.CTk):
                     fg_color=ACCENT if is_sel else 'transparent',
                     border_width=0 if is_sel else 1,
                     hover_color=ACCENT_HOVER if is_sel else BG_CARD_HOVER,
-                    text_color=WHITE if is_sel else TEXT_PRI,
-                    font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10))
+                    text_color=WHITE if is_sel else TEXT_PRI)
+                adapt = w.get('adapt_fonts')
+                if adapt:
+                    adapt()
             except Exception:
                 pass
         self._update_selection_count()
@@ -6241,13 +7558,46 @@ class ModernApp(ctk.CTk):
                 rthumb_holder, text=f' {r_dur} ', text_color=WHITE, fg_color='#000000',
                 corner_radius=4, font=('Consolas', 8, 'bold')).place(relx=1.0, rely=1.0, anchor='se', x=-4, y=-4)
 
+        # Subtitle-language outline badges — bottom-left of thumbnail
+        try:
+            _sub_cache = SubtitleCache()
+        except Exception:
+            _sub_cache = None
+        _sub_dest_var = getattr(self, '_dest_var', None)
+        _sub_dest = _sub_dest_var.get() if _sub_dest_var is not None else getattr(self, '_dest', '')
+        _sub_listing_url = getattr(self, '_current_base_url', '')
+        try:
+            sub_langs = _available_subtitle_langs(
+                rv, dest=_sub_dest, cache=_sub_cache,
+                listing_url=_sub_listing_url)
+        except Exception:
+            sub_langs = ()
+        sub_badges = []
+        if sub_langs:
+            _bx = 5
+            for _lang in sub_langs:
+                _color = _SUBTITLE_BADGE_COLORS.get(_lang, '#90A4AE')
+                _badge = ctk.CTkLabel(
+                    rthumb_holder, text=_lang,
+                    width=25, height=16, corner_radius=0,
+                    border_width=1, border_color=_color,
+                    fg_color=('#101018', '#101018'), text_color=_color,
+                    font=('Consolas', 8, 'bold'))
+                _badge.place(
+                    relx=0, rely=1.0, anchor='sw', x=_bx, y=-4)
+                _badge.lift()
+                sub_badges.append(_badge)
+                _bx += 29
+
         # Details Section
         rinfo = ctk.CTkFrame(rcard, fg_color='transparent')
         rinfo.pack(fill='x', padx=8, pady=(6, 8))
 
-        ctk.CTkLabel(
+        r_title_lbl = ctk.CTkLabel(
             rinfo, text=r_title, text_color=TEXT_PRI,
-            font=(ui_font(), 10, 'bold'), wraplength=wrap_w, justify='left').pack(anchor='w', fill='x', pady=(0, 4))
+            font=(ui_font(), 10, 'bold'), wraplength=wrap_w, justify='left')
+        r_title_lbl.pack(anchor='w', fill='x', pady=(0, 4))
+        ToolTip(r_title_lbl, r_title)
 
         rbadges = ctk.CTkFrame(rinfo, fg_color='transparent')
         rbadges.pack(anchor='w', fill='x')
@@ -6297,6 +7647,8 @@ class ModernApp(ctk.CTk):
         _bind_rv(rthumb_holder)
         _bind_rv(rlbl)
         _bind_rv(rinfo)
+        for _bw in sub_badges:
+            _bind_rv(_bw)
 
     def _on_card_heart_click(self, video: dict, url: str, btn_widget=None):
         target_url = url or (video or {}).get('url') or (video or {}).get('page_url') or ''
@@ -6375,8 +7727,10 @@ class ModernApp(ctk.CTk):
                 fg_color=ACCENT if is_sel else 'transparent',
                 border_width=0 if is_sel else 1,
                 hover_color=ACCENT_HOVER if is_sel else BG_CARD_HOVER,
-                text_color=WHITE if is_sel else TEXT_PRI,
-                font=(ui_font(), 10, 'bold') if is_sel else (ui_font(), 10))
+                text_color=WHITE if is_sel else TEXT_PRI)
+            adapt = w.get('adapt_fonts')
+            if adapt:
+                adapt()
         except Exception:
             pass
 
@@ -6422,6 +7776,15 @@ class ModernApp(ctk.CTk):
         self._site_key = val
         self._active_tag_slug = None
         self._active_tag_url = None
+        self._entity_prev_base_url = ''
+        self._entity_prev_cat = ''
+        self._entity_prev_from_preview = False
+        self._entity_prev_preview_video = None
+        self._entity_search_pending = False
+        self._entity_candidates = []
+        self._entity_site_key = ''
+        self._exit_search_all_view()
+        self._hide_page_heading()
         self._categories.clear()
         self._selected_urls.clear()
         self._selected_source_subtitle_evidence.clear()
@@ -6440,6 +7803,15 @@ class ModernApp(ctk.CTk):
             self._set_browse_mode('grid')
         self._active_tag_slug = None
         self._active_tag_url = None
+        self._entity_prev_base_url = ''
+        self._entity_prev_cat = ''
+        self._entity_prev_from_preview = False
+        self._entity_prev_preview_video = None
+        self._entity_search_pending = False
+        self._entity_candidates = []
+        self._entity_site_key = ''
+        self._exit_search_all_view()
+        self._hide_page_heading()
         self._current_base_url = self._categories[idx]['url']
         self._page = 1
         self._last_loaded_page = 1
@@ -6452,6 +7824,31 @@ class ModernApp(ctk.CTk):
         self._rebuild_sidebar()
         self._load_page()
 
+    def _exit_search_all_view(self):
+        """Leave the multi-site search result view (used when the user navigates
+        to a category / tag / entity page so it never lingers)."""
+        self._search_all_active = False
+        self._search_all_query = ''
+        self._hide_page_heading()
+
+    def _toggle_search_all(self):
+        self._search_all_mode = not self._search_all_mode
+        if not self._search_all_mode:
+            self._exit_search_all_view()
+        self._update_search_all_indicator()
+
+    def _update_search_all_indicator(self):
+        """Sync the compass icon color to the search-all state (icon only)."""
+        lbl = getattr(self, '_compass_lbl', None)
+        if lbl is not None:
+            try:
+                icon = (getattr(self, '_compass_icon_active', None)
+                        if self._search_all_mode else getattr(self, '_compass_icon', None))
+                if icon is not None:
+                    lbl.configure(image=icon)
+            except Exception:
+                pass
+
     def _on_search(self):
         q = (self._search_entry.get() if hasattr(self, '_search_entry') and self._search_entry else (self._search_var.get() if hasattr(self, '_search_var') else '')).strip()
         if not q:
@@ -6461,18 +7858,36 @@ class ModernApp(ctk.CTk):
         if getattr(self, '_browse_mode', 'grid') != 'grid':
             self._set_browse_mode('grid')
         from urllib.parse import quote
-        if self._site_key == 'JableTV':
-            # JableTV does not expose language-specific listing/search variants.
-            self._current_base_url = f'https://jable.tv/search/?q={quote(q, safe="")}'
-        elif self._site_key == 'SupJav':
-            self._current_base_url = SupJavBrowser.search_url(q, lang=T('supjav_lang'))
+        self._entity_prev_base_url = ''
+        self._entity_prev_cat = ''
+        self._entity_prev_from_preview = False
+        self._entity_prev_preview_video = None
+        self._entity_search_pending = False
+        self._entity_candidates = []
+        self._entity_site_key = ''
+        self._hide_page_heading()
+        if self._search_all_mode:
+            # Search From All: query every site at once and merge results.
+            self._search_all_active = True
+            self._search_all_query = q
+            self._current_base_url = ''
+            self._show_search_all_heading(q)
         else:
-            lang = T('missav_lang')
-            eq = quote(q, safe='')
-            if lang:
-                self._current_base_url = f'https://missav.ai/{lang}/search/{eq}'
+            self._search_all_active = False
+            self._search_all_query = ''
+            if self._site_key == 'JableTV':
+                # JableTV only serves search results from the raw path form
+                # (/search/<name>/); the ?q= form returns an empty grid.
+                self._current_base_url = f'https://jable.tv/search/{q}/'
+            elif self._site_key == 'SupJav':
+                self._current_base_url = SupJavBrowser.search_url(q, lang=T('supjav_lang'))
             else:
-                self._current_base_url = f'https://missav.ai/search/{eq}'
+                lang = T('missav_lang')
+                eq = quote(q, safe='')
+                if lang:
+                    self._current_base_url = f'https://missav.ai/{lang}/search/{eq}'
+                else:
+                    self._current_base_url = f'https://missav.ai/search/{eq}'
         self._page = 1
         self._last_loaded_page = 1
         self._has_next = True
@@ -6483,14 +7898,202 @@ class ModernApp(ctk.CTk):
         self._update_selection_count()
         self._load_page()
 
-    def _on_tag_click(self, url: str, name: str, slug: str = ''):
+    # ── Entity pages (actress / director / studio / tag) ────────────────
+    _ENTITY_LABELS = {
+        'actress': 'Actress',
+        'director': 'Director',
+        'studio': 'Studio',
+        'tag': 'Tag',
+    }
+    _ENTITY_NAME_KEYS = {
+        'actress': ('actress', 'actresses', 'model', 'models', 'cast'),
+        'director': ('director', 'directors'),
+        'studio': ('studio', 'maker', 'publisher', 'production'),
+        'tag': ('tags', 'categories', 'keywords'),
+    }
+
+    def _tag_slug_for_name(self, name):
+        """Find the JableTV sidebar slug for a tag name, if it is a known tag."""
+        name = (name or '').strip().lower()
+        if not name:
+            return ''
+        try:
+            from M3U8Sites.SiteJableTV import JableTVBrowser
+            for _group, tags in JableTVBrowser.SIDEBAR_TAGS.items():
+                for tag_name, slug in tags:
+                    if tag_name.lower() == name or slug.lower() == name:
+                        return slug
+        except Exception:
+            pass
+        return ''
+
+    def _site_search_url(self, query, site_key=None):
+        """Build a search listing URL for a site (defaults to the current site)."""
+        site_key = site_key or self._site_key
+        query = (query or '').strip()
+        if not query:
+            return ''
+        from urllib.parse import quote
+        if site_key == 'JableTV':
+            # jable.tv only serves search results for a raw (unencoded) path.
+            return f'https://jable.tv/search/{query}/'
+        if site_key == 'SupJav':
+            return SupJavBrowser.search_url(query, lang=T('supjav_lang'))
+        lang = T('missav_lang')
+        q = quote(query, safe='')
+        return f'https://missav.ai/{lang}/search/{q}' if lang else f'https://missav.ai/search/{q}'
+
+    def _entity_listing_url(self, kind, name):
+        """Build a browse URL that lists everything for an actress / director /
+        studio / tag. Dedicated listing pages are unreliable across sites, so we
+        run a quick search over the database by name and show only those titles."""
+        from urllib.parse import quote
+        name = (name or '').strip()
+        if not name:
+            return ''
+        q = quote(name, safe='')
+        if self._site_key == 'JableTV':
+            if kind == 'tag':
+                slug = self._tag_slug_for_name(name)
+                if slug:
+                    return JableTVBrowser.tag_url(slug)
+            return self._site_search_url(name)
+        if self._site_key == 'MissAV':
+            if kind == 'tag':
+                return f'https://missav.ai/tags/{q}'
+            return self._site_search_url(name)
+        return self._site_search_url(name)
+
+    def _show_page_heading(self, kind, name):
+        hdr = getattr(self, '_page_heading', None)
+        if hdr is None:
+            return
+        prefix = self._ENTITY_LABELS.get(kind, '')
+        text = f'{prefix}: {name}' if prefix else name
+        self._entity_heading_base_text = text
+        self._refresh_entity_heading()
+        try:
+            self._page_heading_close.pack(side='left', padx=12, pady=6)
+        except Exception:
+            pass
+        try:
+            hdr.pack(fill='x', before=getattr(self, '_grid_scroll', None))
+        except (tk.TclError, Exception):
+            try:
+                hdr.pack(fill='x')
+            except Exception:
+                pass
+
+    def _show_search_all_heading(self, query):
+        """Banner above the merged Search From All results."""
+        hdr = getattr(self, '_page_heading', None)
+        if hdr is None:
+            return
+        self._entity_heading_base_text = f'{T("search_all_title")}: {query}'
+        self._refresh_entity_heading()
+        try:
+            self._page_heading_close.pack_forget()
+        except Exception:
+            pass
+        try:
+            hdr.pack(fill='x', before=getattr(self, '_grid_scroll', None))
+        except (tk.TclError, Exception):
+            try:
+                hdr.pack(fill='x')
+            except Exception:
+                pass
+
+    def _refresh_entity_heading(self):
+        """Re-render the heading label, appending the source site when the
+        entity's videos come from a site other than the one being browsed."""
+        text = getattr(self, '_entity_heading_base_text', '') or ''
+        site = getattr(self, '_entity_site_key', '') or self._site_key
+        if site and site != self._site_key:
+            text = f'{text}  ·  {site}'
+        try:
+            self._page_heading_lbl.configure(text=f'  {text}  ')
+        except Exception:
+            pass
+
+    def _hide_page_heading(self):
+        self._active_entity = None
+        hdr = getattr(self, '_page_heading', None)
+        if hdr is None:
+            return
+        try:
+            hdr.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _open_entity_page(self, kind, name, url=''):
+        """Open a 'second page' in the browse grid showing all videos related to
+        an actress / director / studio / tag. The heading bar is titled with the
+        entity name."""
+        # Remember the video player page when the entity is opened from a preview,
+        # so the back button returns the user to the exact player they came from.
+        if getattr(self, '_browse_mode', 'grid') == 'preview':
+            self._entity_prev_from_preview = True
+            self._entity_prev_preview_video = dict(self._preview_video or {})
+        else:
+            self._entity_prev_from_preview = False
+            self._entity_prev_preview_video = None
         if getattr(self, '_tab_keys', ['browse'])[getattr(self, '_active_tab_idx', 0)] != 'browse':
             self._select_tab('browse')
         if getattr(self, '_browse_mode', 'grid') != 'grid':
             self._set_browse_mode('grid')
-        self._active_tag_slug = slug
-        self._active_tag_url = url
-        self._current_base_url = url
+        name = (name or '').strip()
+        if not name and not url:
+            return
+        if not url:
+            url = self._entity_listing_url(kind, name)
+        if not url:
+            return
+        if not getattr(self, '_entity_prev_base_url', None):
+            self._entity_prev_base_url = self._current_base_url
+            try:
+                self._entity_prev_cat = self._cat_var.get()
+            except Exception:
+                self._entity_prev_cat = ''
+        if kind == 'tag':
+            self._active_tag_slug = self._tag_slug_for_name(name) or None
+            self._active_tag_url = url
+        else:
+            self._active_tag_slug = None
+            self._active_tag_url = None
+        self._active_entity = {'kind': kind, 'name': name, 'url': url}
+        # Fallback chain for showing every title the entity is part of:
+        #   1) the exact page (if one was passed/known),
+        #   2) a quick search using the clicked name — on the current site,
+        #      then on the other supported sites,
+        #   3) searches using the other name variants found in the metadata
+        #      (e.g. kanji vs. romaji spellings of the same actress).
+        # Each candidate (url, site) is tried only if the previous one returns
+        # nothing, so a black screen is never the outcome.
+        order = [self._site_key] + [s for s in _ALL_SITE_KEYS if s != self._site_key]
+        candidates = []
+
+        def _add(url, site):
+            if url and site and (url, site) not in candidates:
+                candidates.append((url, site))
+
+        if url:
+            _add(url, self._site_key)
+        if name:
+            for site in order:
+                _add(self._site_search_url(name, site), site)
+            for alt in self._entity_alt_names(kind):
+                alt = (alt or '').strip()
+                if not alt or alt == name:
+                    continue
+                for site in order:
+                    _add(self._site_search_url(alt, site), site)
+        if not candidates:
+            return
+        self._exit_search_all_view()
+        self._entity_candidates = candidates
+        self._entity_search_pending = len(candidates) > 1
+        self._current_base_url = candidates[0][0]
+        self._entity_site_key = candidates[0][1]
         self._page = 1
         self._last_loaded_page = 1
         self._has_next = True
@@ -6499,8 +8102,61 @@ class ModernApp(ctk.CTk):
         self._selected_urls.clear()
         self._selected_source_subtitle_evidence.clear()
         self._update_selection_count()
+        self._show_page_heading(kind, name)
         self._rebuild_sidebar()
         self._load_page()
+
+    def _entity_alt_names(self, kind):
+        """Other name spellings for the same entity, collected from the preview
+        metadata (used to retry a search that otherwise comes back empty)."""
+        keys = self._ENTITY_NAME_KEYS.get(kind, ('actress', 'actresses', 'model', 'models', 'cast'))
+        return self._preview_list(*keys)
+
+    def _close_entity_page(self):
+        """Close the entity page and return to where the user came from: the
+        previous category listing, or the video player if the entity page was
+        opened from a preview."""
+        prev = getattr(self, '_entity_prev_base_url', '')
+        prev_cat = getattr(self, '_entity_prev_cat', '')
+        came_from_preview = getattr(self, '_entity_prev_from_preview', False)
+        prev_video = getattr(self, '_entity_prev_preview_video', None)
+        self._entity_prev_from_preview = False
+        self._entity_prev_preview_video = None
+        self._entity_search_pending = False
+        self._exit_search_all_view()
+
+        # Return to the video player page the user was on before opening the entity page.
+        if came_from_preview and isinstance(prev_video, dict) and prev_video.get('url'):
+            self._preview_stack = [dict(prev_video)]
+            self._open_preview(prev_video, is_back_nav=True)
+            return
+
+        self._entity_prev_base_url = ''
+        self._entity_prev_cat = ''
+        self._entity_candidates = []
+        self._entity_site_key = ''
+        self._active_tag_slug = None
+        self._active_tag_url = None
+        self._hide_page_heading()
+        if prev and prev != self._current_base_url:
+            self._current_base_url = prev
+            self._page = 1
+            self._last_loaded_page = 1
+            self._has_next = True
+            self._browse_blocked = False
+            self._browse_empty_message = ''
+            self._selected_urls.clear()
+            self._selected_source_subtitle_evidence.clear()
+            self._update_selection_count()
+            if prev_cat:
+                try:
+                    self._cat_var.set(prev_cat)
+                except Exception:
+                    pass
+            self._load_page()
+
+    def _on_tag_click(self, url: str, name: str, slug: str = ''):
+        self._open_entity_page('tag', name, url)
 
     # ── Sidebar ──────────────────────────────────────────────────────
     def _rebuild_sidebar(self):
@@ -6524,19 +8180,46 @@ class ModernApp(ctk.CTk):
         ctk.CTkFrame(self._sidebar, height=1,
                      fg_color=BORDER).pack(fill='x', padx=8, pady=(0, 8))
 
-        if self._site_key != 'JableTV':
-            empty_card = ctk.CTkFrame(self._sidebar, fg_color=BG_CARD, corner_radius=CONTROL_RADIUS,
-                                      border_width=1, border_color=BORDER)
-            empty_card.pack(fill='x', padx=8, pady=16)
-            ctk.CTkLabel(empty_card, text=T('tags_jable_only'),
-                         text_color=TEXT_SEC,
-                         font=(ui_font(), 10)).pack(padx=10, pady=7)
-            return
+        # JableTV has a rich tag taxonomy; MissAV / SupJav have none, so offer
+        # their categories as sidebar filters instead of an empty panel.
+        # Each entry is (display_name, url, slug_or_''); an empty slug means the
+        # button navigates to a category/page, otherwise it opens a tag page.
+        # All groups start collapsed; they only expand when the header is toggled.
+        if self._site_key == 'JableTV':
+            tags_by_group = {
+                T('sidebar_popular_tags'): [
+                    (en_name, JableTVBrowser.tag_url(slug), slug)
+                    for en_name, slug in JABLE_EN_TAG_GROUPS
+                ]
+            }
+            for group_name, tag_list in JableTVBrowser.SIDEBAR_TAGS.items():
+                tags_by_group[group_name] = [
+                    (site_i18n.loc(site_i18n.TAGS, slug, name),
+                     JableTVBrowser.tag_url(slug),
+                     slug)
+                    for name, slug in tag_list
+                ]
+        else:
+            tags_by_group = {}
+            if self._site_key == 'MissAV':
+                for nav_label, nav_items in MISS_AV_HEADER_NAV:
+                    tags_by_group[nav_label] = [(name, url, '') for name, url in nav_items]
+                lang = T('missav_lang')
+            else:
+                lang = T('supjav_lang')
+            try:
+                cats = SITES[self._site_key]['browser'].fetch_categories(lang=lang)
+            except Exception:
+                cats = []
+            tags_by_group[T('sidebar_categories')] = [(c['name'], c['url'], '') for c in cats]
 
-        tags = JableTVBrowser.SIDEBAR_TAGS
-        for group_name, tag_list in tags.items():
+        lookup_tag_groups = self._site_key == 'JableTV'
+        for group_name, tag_list in tags_by_group.items():
+            if not tag_list:
+                continue
             expanded = self._sidebar_expanded.get(group_name, False)
-            display_group_name = site_i18n.loc(site_i18n.TAG_GROUPS, group_name, group_name)
+            display_group_name = (site_i18n.loc(site_i18n.TAG_GROUPS, group_name, group_name)
+                                  if lookup_tag_groups else group_name)
 
             # Sleek Group Header Card Button
             arrow = '▾' if expanded else '▸'
@@ -6555,13 +8238,17 @@ class ModernApp(ctk.CTk):
             hdr.pack(fill='x', padx=6, pady=2)
 
             if expanded:
-                for name, slug in tag_list:
-                    tag_url = JableTVBrowser.tag_url(slug)
-                    display_name = site_i18n.loc(site_i18n.TAGS, slug, name)
-                    is_active = (
-                        getattr(self, '_active_tag_slug', None) == slug or
-                        getattr(self, '_active_tag_url', None) == tag_url
-                    )
+                for display_name, item_url, slug in tag_list:
+                    if slug:
+                        is_active = (
+                            getattr(self, '_active_tag_slug', None) == slug or
+                            getattr(self, '_active_tag_url', None) == item_url
+                        )
+                    else:
+                        is_active = (
+                            (self._current_base_url or '').rstrip('/') ==
+                            item_url.rstrip('/')
+                        )
                     btn = ctk.CTkButton(
                         self._sidebar, text=f"•  {display_name}",
                         fg_color='transparent',
@@ -6570,11 +8257,57 @@ class ModernApp(ctk.CTk):
                         anchor='w',
                         font=(ui_font(), 10, 'bold' if is_active else 'normal'),
                         height=26, corner_radius=6,
-                        command=lambda u=tag_url, n=display_name, s=slug: self._on_tag_click(u, n, s))
+                        command=lambda u=item_url, n=display_name, s=slug: (
+                            self._on_tag_click(u, n, s) if s
+                            else self._on_sidebar_cat_click(u, n)))
                     btn.pack(fill='x', padx=(16, 6), pady=1)
 
+    def _on_sidebar_cat_click(self, url: str, name: str):
+        """Navigate to a category straight from the sidebar (used by sites that
+        have categories but no tag taxonomy, e.g. MissAV / SupJav)."""
+        if name:
+            idx = next((i for i, c in enumerate(self._categories)
+                        if c['name'] == name), -1)
+            if idx >= 0:
+                self._on_cat_change(name)
+                return
+        if getattr(self, '_tab_keys', ['browse'])[getattr(self, '_active_tab_idx', 0)] != 'browse':
+            self._select_tab('browse')
+        if getattr(self, '_browse_mode', 'grid') != 'grid':
+            self._set_browse_mode('grid')
+        self._active_tag_slug = None
+        self._active_tag_url = None
+        self._entity_prev_base_url = ''
+        self._entity_prev_cat = ''
+        self._entity_search_pending = False
+        self._entity_candidates = []
+        self._entity_site_key = ''
+        self._exit_search_all_view()
+        self._hide_page_heading()
+        self._current_base_url = url
+        self._page = 1
+        self._last_loaded_page = 1
+        self._has_next = True
+        self._browse_blocked = False
+        self._browse_empty_message = ''
+        self._selected_urls.clear()
+        self._selected_source_subtitle_evidence.clear()
+        self._update_selection_count()
+        try:
+            if name and self._cat_menu.cget('values'):
+                self._cat_var.set(name)
+        except Exception:
+            pass
+        self._rebuild_sidebar()
+        self._load_page()
+
     def _toggle_group(self, group: str):
-        self._sidebar_expanded[group] = not self._sidebar_expanded.get(group, False)
+        was_expanded = self._sidebar_expanded.get(group, False)
+        if was_expanded:
+            self._sidebar_expanded[group] = False
+        else:
+            self._sidebar_expanded.clear()
+            self._sidebar_expanded[group] = True
         self._rebuild_sidebar()
 
     # ── Download actions ─────────────────────────────────────────────
@@ -6761,6 +8494,9 @@ class ModernApp(ctk.CTk):
         self._cf_ua_var.set(ov.get('ua', ''))
 
     def _refresh_proxy_status(self, saved=False):
+        lbl = getattr(self, '_proxy_status_lbl', None)
+        if not lbl:
+            return
         mode = config.get_proxy_mode()
         if mode == 'manual' and config.get_proxy_url():
             text, color = T('proxy_enabled'), SUCCESS
@@ -6778,7 +8514,10 @@ class ModernApp(ctk.CTk):
             text, color = T('proxy_disabled'), TEXT_DIM
         if saved:
             text = f"{T('proxy_saved')} · {text}"
-        self._proxy_status_lbl.configure(text=text, text_color=color)
+        try:
+            lbl.configure(text=text, text_color=color)
+        except Exception:
+            pass
 
     def _on_proxy_save(self):
         try:
@@ -6813,8 +8552,13 @@ class ModernApp(ctk.CTk):
         host = self._cf_host_var.get()
         config.set_cf_override(host, self._cf_cookie_var.get(), self._cf_ua_var.get())
         self._refresh_cf_status()
-        current = self._cf_status_lbl.cget('text')
-        self._cf_status_lbl.configure(text=f"{T('cf_saved')} | {current}")
+        lbl = getattr(self, '_cf_status_lbl', None)
+        if lbl:
+            try:
+                current = lbl.cget('text')
+                lbl.configure(text=f"{T('cf_saved')} | {current}")
+            except Exception:
+                pass
 
     def _on_cf_clear(self):
         host = self._cf_host_var.get()
@@ -6824,11 +8568,17 @@ class ModernApp(ctk.CTk):
         self._refresh_cf_status()
 
     def _refresh_cf_status(self):
+        lbl = getattr(self, '_cf_status_lbl', None)
+        if not lbl:
+            return
         hosts = config.cf_override_hosts()
-        if hosts:
-            self._cf_status_lbl.configure(text=T('cf_status', hosts=', '.join(hosts)))
-        else:
-            self._cf_status_lbl.configure(text=T('cf_status_none'))
+        try:
+            if hosts:
+                lbl.configure(text=T('cf_status', hosts=', '.join(hosts)))
+            else:
+                lbl.configure(text=T('cf_status_none'))
+        except Exception:
+            pass
 
     def _on_speed_change(self, val):
         from M3U8Sites.M3U8Crawler import speed_limiter
@@ -6858,6 +8608,122 @@ class ModernApp(ctk.CTk):
         quality = config.set_recognition_quality(quality)
         self._recognition_quality_var.set(
             self._recognition_quality_label(quality))
+
+    def _prefetch_subtitle_models(self):
+        if getattr(self, '_subtitle_prefetching', False):
+            return
+        if not messagebox.askyesno(
+                T('subtitle_prefetch_confirm_title'),
+                T('subtitle_prefetch_confirm_body')):
+            return
+        self._subtitle_prefetching = True
+        self._subtitle_prefetch_status_text = T('subtitle_prefetch_started')
+        self._subtitle_prefetch_btn.configure(state='disabled')
+        self._subtitle_prefetch_status.configure(
+            text=self._subtitle_prefetch_status_text)
+        threading.Thread(
+            target=self._prefetch_subtitle_models_worker,
+            daemon=True).start()
+
+    def _prefetch_subtitle_models_worker(self):
+        stage_keys = {
+            'runtime': 'subtitle_stage_runtime',
+            'model': 'subtitle_stage_model',
+            'translation_model': 'subtitle_stage_translation_model',
+        }
+
+        def _progress(stage, percent):
+            text = T(stage_keys.get(stage, stage))
+            if percent is not None:
+                text = f'{text} · {percent}%'
+            self.after(0, lambda: self._set_subtitle_prefetch_status(text))
+
+        try:
+            summary = prefetch_subtitle_models(
+                progress_callback=_progress,
+                cancel_check=lambda: self._is_closing)
+            status = T('subtitle_prefetch_done')
+            if not summary.get('translation'):
+                status = (
+                    f"{status} · {T('subtitle_prefetch_translation_skipped')}")
+            self.after(
+                0, lambda: self._set_subtitle_prefetch_status(status))
+        except Exception as exc:
+            message = str(exc or '').strip() or exc.__class__.__name__
+            self.after(0, lambda: self._set_subtitle_prefetch_status(
+                T('subtitle_prefetch_error', error=message)))
+        finally:
+            self._subtitle_prefetching = False
+            self.after(
+                0, lambda: self._set_subtitle_prefetch_button_enabled())
+
+    def _set_subtitle_prefetch_status(self, text):
+        self._subtitle_prefetch_status_text = text
+        label = getattr(self, '_subtitle_prefetch_status', None)
+        if label is not None:
+            try:
+                label.configure(text=text)
+            except Exception:
+                pass
+
+    def _set_subtitle_prefetch_button_enabled(self):
+        if getattr(self, '_subtitle_prefetching', False):
+            return
+        btn = getattr(self, '_subtitle_prefetch_btn', None)
+        if btn is not None:
+            try:
+                btn.configure(state='normal')
+            except Exception:
+                pass
+
+    def _update_subtitle_cache_status(self):
+        lbl = getattr(self, '_subtitle_clear_status', None)
+        if lbl is None:
+            return
+        try:
+            cache = SubtitleCache()
+            stats = cache.get_cache_stats()
+            count = stats.get('file_count', 0)
+            bytes_total = stats.get('total_bytes', 0)
+            if count > 0:
+                size_mb = bytes_total / (1024 * 1024)
+                if size_mb >= 0.1:
+                    size_str = f"{size_mb:.1f} MB"
+                else:
+                    size_kb = max(1, round(bytes_total / 1024))
+                    size_str = f"{size_kb} KB"
+                lbl.configure(text=T('clear_downloaded_subtitles_count', count=count, size=size_str))
+            else:
+                lbl.configure(text=T('clear_downloaded_subtitles_empty'))
+        except Exception:
+            pass
+
+    def _remove_all_downloaded_subtitles(self):
+        try:
+            cache = SubtitleCache()
+            stats = cache.get_cache_stats()
+            count = stats.get('file_count', 0)
+            if count == 0:
+                messagebox.showinfo(
+                    T('clear_downloaded_subtitles_title'),
+                    T('clear_downloaded_subtitles_already_empty'))
+                return
+            if not messagebox.askyesno(
+                T('clear_downloaded_subtitles_confirm_title'),
+                T('clear_downloaded_subtitles_confirm_body')):
+                return
+
+            removed = cache.clear_all()
+            self._update_subtitle_cache_status()
+            if getattr(self, '_status_lbl', None) is not None:
+                self._status_lbl.configure(text=T('clear_downloaded_subtitles_done', count=removed))
+            messagebox.showinfo(
+                T('clear_downloaded_subtitles_title'),
+                T('clear_downloaded_subtitles_done', count=removed))
+        except Exception as exc:
+            messagebox.showerror(
+                T('clear_downloaded_subtitles_title'),
+                str(exc))
 
     def _on_conc_change(self, _event=None):
         try:
@@ -6996,6 +8862,28 @@ class ModernApp(ctk.CTk):
                 built += 1
             except Exception as e:
                 print(f'[download row build failed] {item.url}: {e}', flush=True)
+
+        desired_rows = [
+            self._dl_rows[i.url]['row']
+            for i in visible
+            if i.url in self._dl_rows and 'row' in self._dl_rows[i.url]
+        ]
+        try:
+            current_slaves = [
+                s for s in self._dl_scroll.pack_slaves()
+                if s is not getattr(self, '_dl_empty_lbl', None)
+                and s is not getattr(self, '_dl_footer_lbl', None)
+            ]
+            if current_slaves != desired_rows:
+                for r in desired_rows:
+                    r.pack_forget()
+                    r.pack(fill='x', padx=16, pady=7)
+                if self._dl_footer_lbl is not None:
+                    self._dl_footer_lbl.pack_forget()
+                    self._dl_footer_lbl.pack(fill='x', padx=12, pady=(4, 16))
+        except Exception:
+            pass
+
         return more_to_build
 
     def _arm_dl_drain(self):
@@ -7160,17 +9048,20 @@ class ModernApp(ctk.CTk):
                 text_color=color, font=(ui_font(), 10, 'bold'))
             state_lbl.pack(fill='both', expand=True, padx=6)
 
+            actions = ctk.CTkFrame(row, fg_color='transparent')
+            actions.pack(side='right', padx=(6, 14))
+
             remove_btn = ctk.CTkButton(
-                row, text='✕', width=32, height=32,
+                actions, text='✕', width=32, height=32,
                 corner_radius=CONTROL_RADIUS,
                 fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
                 hover_color=BG_CARD_HOVER,
                 text_color=TEXT_DIM, font=('Consolas', 12),
                 command=lambda u=item.url: self._dlmgr.remove_item(u))
-            remove_btn.pack(side='right', padx=(6, 14))
+            remove_btn.pack(side='right')
 
             retry_btn = ctk.CTkButton(
-                row, text='↻', width=32, height=32,
+                actions, text='↻', width=32, height=32,
                 corner_radius=CONTROL_RADIUS,
                 fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
                 hover_color=BG_CARD_HOVER,
@@ -7208,6 +9099,7 @@ class ModernApp(ctk.CTk):
                 'row': row, 'state_holder': state_holder,
                 'state_lbl': state_lbl, 'name_lbl': name_lbl,
                 'detail_lbl': detail_lbl, 'metrics': metrics,
+                'actions': actions, 'remove_btn': remove_btn,
                 'pb': pb, 'pct_lbl': pct_lbl, 'spd_lbl': spd_lbl,
                 'retry_btn': retry_btn, '_before_remove': remove_btn,
                 'pb_visible': False, 'pct_visible': False, 'spd_visible': False,
@@ -7270,7 +9162,7 @@ class ModernApp(ctk.CTk):
         retryable = (item.state in ('未完成', '封鎖/解析失敗', '已取消')
                      or (item.state == '已下載' and bool(item.error)))
         if retryable and not w['retry_visible']:
-            w['retry_btn'].pack(side='right', padx=(2, 0), before=w['_before_remove'])
+            w['retry_btn'].pack(side='right', padx=(0, 6))
             w['retry_visible'] = True
         elif not retryable and w['retry_visible']:
             try:
