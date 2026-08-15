@@ -1671,6 +1671,44 @@ class SmallToolApp(ctk.CTk):
         ctk.set_appearance_mode(self._theme_mode)
         ctk.set_default_color_theme('blue')
 
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('FetchJAV.SmallTool')
+            except Exception:
+                pass
+
+        _root_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        _app_dir = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, 'frozen', False) else __file__))
+        _img_dir = os.path.join(_root_dir, 'img')
+        _ico_candidates = [
+            os.path.join(_root_dir, 'logo.ico'),
+            os.path.join(_app_dir, 'logo.ico'),
+            os.path.join(_img_dir, 'favicon.ico'),
+        ]
+        _ico_p = next((p for p in _ico_candidates if os.path.isfile(p)), '')
+        if _ico_p and os.path.exists(_ico_p):
+            try:
+                self.iconbitmap(_ico_p)
+            except Exception:
+                pass
+
+        _png_candidates = [
+            os.path.join(_root_dir, 'logo.png'),
+            os.path.join(_app_dir, 'logo.png'),
+            os.path.join(_img_dir, 'logo.png'),
+            os.path.join(_img_dir, 'favicon-256x256.png'),
+        ]
+        _png_p = next((p for p in _png_candidates if os.path.isfile(p)), '')
+        if _png_p and os.path.exists(_png_p):
+            try:
+                from PIL import Image, ImageTk
+                _app_icon = ImageTk.PhotoImage(Image.open(_png_p))
+                self.iconphoto(True, _app_icon)
+                self._app_icon = _app_icon
+            except Exception:
+                pass
+
         stored = config.get_ui_lang()
         set_lang(stored or 'en')
         self._needs_lang_prompt = (stored is None)

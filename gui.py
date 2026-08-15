@@ -486,17 +486,29 @@ class MainWindow(tk.Tk):
             self.geometry('1340x880')
         _cfg_ttk(self)
 
-        _root_dir = os.path.dirname(os.path.abspath(__file__))
+        _root_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
         _img_dir = os.path.join(_root_dir, 'img')
         _ico_candidates = [
             os.path.join(_root_dir, 'logo.ico'),
-            r'C:\Users\workd\Downloads\logo.ico',
             os.path.join(_img_dir, 'favicon.ico'),
         ]
         _ico_path = next((p for p in _ico_candidates if os.path.isfile(p)), '')
         if _ico_path:
             try:
                 self.iconbitmap(_ico_path)
+            except Exception:
+                pass
+        _png_candidates = [
+            os.path.join(_root_dir, 'logo.png'),
+            os.path.join(_img_dir, 'logo.png'),
+            os.path.join(_img_dir, 'favicon-256x256.png'),
+        ]
+        _png_path = next((p for p in _png_candidates if os.path.isfile(p)), '')
+        if _png_path:
+            try:
+                _app_icon = ImageTk.PhotoImage(Image.open(_png_path))
+                self.iconphoto(True, _app_icon)
+                self._app_icon = _app_icon
             except Exception:
                 pass
 

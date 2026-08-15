@@ -128,6 +128,8 @@ Configure destination folders, default resolution preferences (Highest, 1080p, 7
    - Click preview to watch immediately, or select cards to add to the download queue.
    - Paste URLs directly or import `.txt` / `.csv` batches in the **Download** tab.
 
+> SmartScreen reputation warnings and Defender Antivirus detections are distinct events. Please review [Windows Download & Security Verification](./WINDOWS_SECURITY.md): verify `SHA256SUMS.txt` and GitHub provenance; do not lower protection settings if a threat is reported. Please stop and report it if the fallback is also detected.
+
 ---
 
 ## 🛠️ Run from Source (macOS / Linux / Developer)

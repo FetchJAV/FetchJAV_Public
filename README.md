@@ -243,6 +243,8 @@ When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/
 2. **執行**：將檔案放入任意可讀寫資料夾，**直接雙擊執行**（免安裝 Python、免額外配置）。
 3. **開始使用**：在「瀏覽」選擇網站、搜尋關鍵字，點擊預覽或加入佇列下載。
 
+> SmartScreen 信譽提醒與 Defender Antivirus 隔離是不同事件。請先閱讀 [Windows 下載與安全驗證](./WINDOWS_SECURITY.md)：核對 `SHA256SUMS.txt` 與 GitHub provenance；若 Defender 顯示 threat name，請勿直接降低防護設定。若備用包也被偵測，請停止並回報。
+
 ---
 
 ## 📜 授權與責任聲明

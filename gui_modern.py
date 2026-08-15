@@ -20,6 +20,46 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 import customtkinter as ctk
+
+def _resolve_resource_path(rel_path: str) -> str:
+    """Find a resource path across development repo and PyInstaller bundle locations."""
+    candidates = []
+    if getattr(sys, '_MEIPASS', None):
+        candidates.append(os.path.join(sys._MEIPASS, rel_path))
+    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), rel_path))
+    if getattr(sys, 'frozen', False):
+        app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        candidates.append(os.path.join(app_dir, rel_path))
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return candidates[0]
+
+def _setup_vlc_environment():
+    """Ensure VLC DLL paths and environment variables are configured on Windows."""
+    if sys.platform == 'win32':
+        candidates = [
+            os.environ.get('PYTHON_VLC_LIB_PATH', ''),
+            os.environ.get('PYTHON_VLC_MODULE_PATH', ''),
+            r'C:\Program Files\VideoLAN\VLC',
+            r'C:\Program Files (x86)\VideoLAN\VLC',
+            os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'VideoLAN', 'VLC'),
+            os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'VideoLAN', 'VLC'),
+            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'VideoLAN', 'VLC'),
+        ]
+        for p in candidates:
+            if p and os.path.isdir(p) and os.path.isfile(os.path.join(p, 'libvlc.dll')):
+                if hasattr(os, 'add_dll_directory'):
+                    try:
+                        os.add_dll_directory(p)
+                    except Exception:
+                        pass
+                if not os.environ.get('PYTHON_VLC_LIB_PATH'):
+                    os.environ['PYTHON_VLC_LIB_PATH'] = os.path.join(p, 'libvlc.dll')
+                if p not in os.environ.get('PATH', ''):
+                    os.environ['PATH'] = p + os.pathsep + os.environ.get('PATH', '')
+                break
+
 # Apply custom SVG chevron arrow (d="m19.5 8.25-7.5 7.5-7.5-7.5") & icon-only hover color for CTkOptionMenu
 try:
     import customtkinter.windows.widgets.core_rendering.draw_engine as _draw_engine_mod
@@ -1470,7 +1510,6 @@ class ModernApp(ctk.CTk):
         super().__init__()
 
         get_shared_ssl_context()
-
         config.load_cf_overrides()
         self._lang_code_by_name = {name: code for code, name in LANGUAGES}
         self._lang_name_by_code = {code: name for code, name in LANGUAGES}
@@ -1503,24 +1542,22 @@ class ModernApp(ctk.CTk):
             except Exception:
                 pass
 
-        _root_dir = os.path.dirname(os.path.abspath(__file__))
-        _img_dir = os.path.join(_root_dir, 'img')
         _ico_candidates = [
-            os.path.join(_root_dir, 'logo.ico'),
-            r'C:\Users\workd\Downloads\logo.ico',
-            os.path.join(_img_dir, 'favicon.ico'),
+            _resolve_resource_path('logo.ico'),
+            _resolve_resource_path(os.path.join('img', 'favicon.ico')),
         ]
-        _ico_path = next((p for p in _ico_candidates if os.path.isfile(p)), os.path.join(_img_dir, 'favicon.ico'))
+        _ico_path = next((p for p in _ico_candidates if os.path.isfile(p)), _resolve_resource_path(os.path.join('img', 'favicon.ico')))
         self._ico_path = _ico_path
 
         _png_candidates = [
-            os.path.join(_root_dir, 'logo.png'),
-            os.path.join(_img_dir, 'favicon-256x256.png'),
-            os.path.join(_img_dir, 'apple-touch-icon.png'),
+            _resolve_resource_path('logo.png'),
+            _resolve_resource_path(os.path.join('img', 'logo.png')),
+            _resolve_resource_path(os.path.join('img', 'favicon-256x256.png')),
+            _resolve_resource_path(os.path.join('img', 'apple-touch-icon.png')),
         ]
         _png_path = next((p for p in _png_candidates if os.path.isfile(p)), '')
 
-        if os.path.exists(_ico_path):
+        if _ico_path and os.path.exists(_ico_path):
             try:
                 self.iconbitmap(_ico_path)
             except Exception:
@@ -1630,7 +1667,7 @@ class ModernApp(ctk.CTk):
         self._browse_icon = None
         self._open_icon = None
         self._tag_icon = None
-        img_dir_dest = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir_dest = _resolve_resource_path('img')
         try:
             b_light_p = os.path.join(img_dir_dest, 'icon_browse_light.png')
             b_dark_p = os.path.join(img_dir_dest, 'icon_browse_dark.png')
@@ -2602,11 +2639,11 @@ class ModernApp(ctk.CTk):
         brand.pack(side='left', padx=16, fill='y')
 
         self._brand_logo_lbl = None
-        logo_png_p = os.path.join(os.path.dirname(__file__), 'logo.png')
+        logo_png_p = _resolve_resource_path('logo.png')
         if not os.path.exists(logo_png_p):
-            logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'logo.png')
+            logo_png_p = _resolve_resource_path(os.path.join('img', 'logo.png'))
         if not os.path.exists(logo_png_p):
-            logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'favicon-256x256.png')
+            logo_png_p = _resolve_resource_path(os.path.join('img', 'favicon-256x256.png'))
 
         if os.path.exists(logo_png_p):
             try:
@@ -2627,7 +2664,7 @@ class ModernApp(ctk.CTk):
         self._brand_lbl_fetch.pack(side='left')
 
         # Gradient JAV Brand Logo Label
-        img_dir_j = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir_j = _resolve_resource_path('img')
         jav_light_p = os.path.join(img_dir_j, 'jav_gradient_light.png')
         jav_dark_p = os.path.join(img_dir_j, 'jav_gradient_dark.png')
 
@@ -2667,7 +2704,7 @@ class ModernApp(ctk.CTk):
 
         # Load list select icon
         self._list_select_icon = None
-        img_dir_ls = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir_ls = _resolve_resource_path('img')
         ls_p = os.path.join(img_dir_ls, 'icon_list_select.png')
         try:
             if os.path.exists(ls_p):
@@ -2678,7 +2715,7 @@ class ModernApp(ctk.CTk):
 
         # Load search icon
         self._search_icon = None
-        img_dir_s = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir_s = _resolve_resource_path('img')
         search_light_p = os.path.join(img_dir_s, 'icon_sub_search_light.png')
         search_dark_p = os.path.join(img_dir_s, 'icon_sub_search_dark.png')
         search_p = os.path.join(img_dir_s, 'icon_search.png')
@@ -2698,7 +2735,7 @@ class ModernApp(ctk.CTk):
         # Load compass icon (Search From All toggle; light/dark + off/on variants)
         self._compass_icon = None
         self._compass_icon_active = None
-        img_dir_c = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir_c = _resolve_resource_path('img')
         comp_light_p = os.path.join(img_dir_c, 'icon_compass_light.png')
         comp_dark_p = os.path.join(img_dir_c, 'icon_compass_dark.png')
         comp_on_light_p = os.path.join(img_dir_c, 'icon_compass_on_light.png')
@@ -2719,7 +2756,7 @@ class ModernApp(ctk.CTk):
 
         # Load theme bulb icon (OFF for Dark Mode, ON for Light Mode)
         self._theme_icon = None
-        img_dir_t = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir_t = _resolve_resource_path('img')
         bulb_on_p = os.path.join(img_dir_t, 'icon_bulb_on.png')
         bulb_off_p = os.path.join(img_dir_t, 'icon_bulb_off.png')
         try:
@@ -2753,7 +2790,7 @@ class ModernApp(ctk.CTk):
 
         # Load tab icons
         self._nav_icons = {}
-        img_dir = os.path.join(os.path.dirname(__file__), 'img')
+        img_dir = _resolve_resource_path('img')
         for key in self._tab_keys:
             fname = 'explore' if key == 'browse' else key
             act_p = os.path.join(img_dir, f'icon_{fname}_active.png')
@@ -3043,15 +3080,6 @@ class ModernApp(ctk.CTk):
         search_box.pack(side='left', fill='x', expand=True, padx=(8, 8))
         search_box.pack_propagate(False)
 
-        self._search_entry = ctk.CTkEntry(
-            search_box,
-            placeholder_text=T('search_placeholder'),
-            placeholder_text_color=('#B0AAA5', '#585350'),
-            height=34, fg_color='transparent', border_width=0,
-            text_color=TEXT_PRI, font=(ui_font(), 11))
-        self._search_entry.pack(side='left', fill='both', expand=True, padx=(10, 2))
-        self._search_entry.bind('<Return>', lambda e: self._on_search())
-
         icon_search_obj = getattr(self, '_search_icon', None)
         if icon_search_obj:
             icon_lbl = ctk.CTkLabel(search_box, text="", image=icon_search_obj, width=28)
@@ -3070,7 +3098,7 @@ class ModernApp(ctk.CTk):
         self._compass_lbl = None
         if compass_obj is not None:
             compass_lbl = ctk.CTkLabel(search_box, text="", image=compass_obj,
-                                       width=28, height=20)
+                                       width=28, height=28)
             compass_lbl.pack(side='right', padx=(0, 2))
             compass_lbl.bind('<Button-1>', lambda e: self._toggle_search_all())
             try:
@@ -3081,6 +3109,15 @@ class ModernApp(ctk.CTk):
             ToolTip(compass_lbl, lambda: (
                 T('search_all_tip_on') if self._search_all_mode else T('search_all_tip_off')))
         self._update_search_all_indicator()
+
+        self._search_entry = ctk.CTkEntry(
+            search_box,
+            placeholder_text=T('search_placeholder'),
+            placeholder_text_color=('#B0AAA5', '#585350'),
+            height=34, fg_color='transparent', border_width=0,
+            text_color=TEXT_PRI, font=(ui_font(), 11))
+        self._search_entry.pack(side='left', fill='both', expand=True, padx=(10, 4))
+        self._search_entry.bind('<Return>', lambda e: self._on_search())
 
         # Container for right-side action buttons
         self._toolbar_actions = ctk.CTkFrame(self._top_toolbar_row1, fg_color='transparent')
@@ -3293,6 +3330,7 @@ class ModernApp(ctk.CTk):
     def _create_vlc_player_on_canvas(self, canvas, proxied_url: str):
         """Create a fresh VLC player bound to `canvas`. Returns the player or None."""
         try:
+            _setup_vlc_environment()
             import vlc
         except Exception:
             return None
@@ -3335,6 +3373,54 @@ class ModernApp(ctk.CTk):
         self._vlc_instance = instance
         self._preview_player = player
         return player
+
+    def _show_preview_player_fallback(self, canvas, player_container, source):
+        """Render a clean fallback card when embedded VLC is unavailable on the system."""
+        try:
+            for child in canvas.winfo_children():
+                child.destroy()
+        except Exception:
+            pass
+
+        card = ctk.CTkFrame(
+            canvas, fg_color=BG_CARD, corner_radius=12,
+            border_width=1, border_color=BORDER_CARD, width=440, height=260)
+        card.place(relx=0.5, rely=0.5, anchor='center')
+        card.pack_propagate(False)
+
+        icon_lbl = ctk.CTkLabel(
+            card, text="🎬", font=(ui_font(), 30), text_color=ACCENT)
+        icon_lbl.pack(pady=(16, 4))
+
+        title_lbl = ctk.CTkLabel(
+            card, text=T('preview_vlc_missing_title'),
+            font=(ui_font(), 13, 'bold'), text_color=TEXT_PRI)
+        title_lbl.pack(pady=(0, 4))
+
+        desc_lbl = ctk.CTkLabel(
+            card,
+            text=T('preview_vlc_missing_desc'),
+            font=(ui_font(), 10), text_color=TEXT_SEC, justify='center', wraplength=380)
+        desc_lbl.pack(pady=(0, 14))
+
+        btn_row = ctk.CTkFrame(card, fg_color='transparent')
+        btn_row.pack()
+
+        target_url = getattr(source, 'page_url', '') or getattr(self, '_preview_proxied_url', '') or getattr(source, 'media_url', '')
+        if target_url:
+            open_btn = ctk.CTkButton(
+                btn_row, text=T('preview_open_in_browser'),
+                font=(ui_font(), 11, 'bold'), fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                text_color=WHITE, corner_radius=6, height=32,
+                command=lambda u=target_url: webbrowser.open(u))
+            open_btn.pack(side='left', padx=6)
+
+        dl_vlc_btn = ctk.CTkButton(
+            btn_row, text=T('preview_download_vlc'),
+            font=(ui_font(), 11, 'bold'), fg_color=BG_HEADER, hover_color=BG_CARD_HOVER,
+            border_width=1, border_color=BORDER, text_color=TEXT_PRI, corner_radius=6, height=32,
+            command=lambda: webbrowser.open('https://www.videolan.org/vlc/download-windows.html'))
+        dl_vlc_btn.pack(side='left', padx=6)
 
     def _init_vlc_player(self, media_url: str, headers: dict, canvas: tk.Canvas):
         try:
@@ -5308,9 +5394,12 @@ class ModernApp(ctk.CTk):
 
         # Start in-app VLC player if stream is playable
         if source.is_playable:
-            self._init_vlc_player(source.media_url, source.headers, canvas)
-            self._bind_player_keyboard_controls(player_container)
-            self._bind_player_keyboard_controls(canvas)
+            vlc_ok = self._init_vlc_player(source.media_url, source.headers, canvas)
+            if vlc_ok:
+                self._bind_player_keyboard_controls(player_container)
+                self._bind_player_keyboard_controls(canvas)
+            else:
+                self._show_preview_player_fallback(canvas, player_container, source)
         else:
             ctk.CTkLabel(
                 canvas, text=source.error or T('preview_no_source'),
@@ -6492,9 +6581,9 @@ class ModernApp(ctk.CTk):
             hdr_row = ctk.CTkFrame(box, fg_color='transparent')
             hdr_row.pack(anchor='w', fill='x', pady=(0, 4))
 
-            logo_p = os.path.join(os.path.dirname(__file__), 'logo.png')
+            logo_p = _resolve_resource_path('logo.png')
             if not os.path.exists(logo_p):
-                logo_p = os.path.join(os.path.dirname(__file__), 'img', 'logo.png')
+                logo_p = _resolve_resource_path(os.path.join('img', 'logo.png'))
             if os.path.exists(logo_p):
                 try:
                     about_logo_pil = Image.open(logo_p)
@@ -6651,7 +6740,7 @@ class ModernApp(ctk.CTk):
             scroll.pack(fill='both', expand=True, padx=(0, 18))
 
             trash_icon = None
-            img_dir_dest = os.path.join(os.path.dirname(__file__), 'img')
+            img_dir_dest = _resolve_resource_path('img')
             t_light_p = os.path.join(img_dir_dest, 'icon_trash_light.png')
             t_dark_p = os.path.join(img_dir_dest, 'icon_trash_dark.png')
             if os.path.exists(t_light_p) and os.path.exists(t_dark_p):
@@ -9589,11 +9678,11 @@ class ModernApp(ctk.CTk):
         # Load Logo
         logo_img = getattr(self, '_brand_logo_img', None)
         if not logo_img:
-            logo_png_p = os.path.join(os.path.dirname(__file__), 'logo.png')
+            logo_png_p = _resolve_resource_path('logo.png')
             if not os.path.exists(logo_png_p):
-                logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'logo.png')
+                logo_png_p = _resolve_resource_path(os.path.join('img', 'logo.png'))
             if not os.path.exists(logo_png_p):
-                logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'favicon-256x256.png')
+                logo_png_p = _resolve_resource_path(os.path.join('img', 'favicon-256x256.png'))
             if os.path.exists(logo_png_p):
                 try:
                     logo_pil = Image.open(logo_png_p)

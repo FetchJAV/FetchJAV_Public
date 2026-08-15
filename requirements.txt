@@ -14,3 +14,4 @@ numpy==2.5.1
 PyYAML==6.0.3
 sentencepiece==0.2.2
 opencc-python-reimplemented==0.1.7
+python-vlc>=3.0.20123
