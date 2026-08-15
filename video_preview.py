@@ -20,7 +20,7 @@ import threading
 import time
 import uuid
 from typing import Callable, Optional
-from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote, urljoin, urlparse
 
 import requests
 
@@ -79,7 +79,10 @@ def resolve_preview_source(
         if site_factory is None:
             import M3U8Sites
             site_factory = M3U8Sites.CreateSite
-        job = site_factory(url, savepath='', silence=True)
+        # Playback should mirror what the site's own player serves (its default server),
+        # not necessarily the highest quality download source — e.g. SupJav's TV server is
+        # instant while its FST CDN is frequently geo-blocked.
+        job = site_factory(url, savepath='', silence=True, prefer_site_default=True)
         if job is None:
             source.error = 'Unsupported URL'
             return source
@@ -525,7 +528,9 @@ class PreviewProxyServer:
             self._send_text(handler, 404, 'Preview source expired', send_body)
             return
         target_url = parse_qs(parsed.query).get('url', [''])[0]
-        target_url = unquote(target_url)
+        # NOTE: parse_qs already percent-decodes the value; do NOT unquote again.
+        # Double-decoding corrupts signed segment URLs that contain literal '%XX'
+        # (e.g. tiktokcdn signatures) and makes the CDN reject them with 403.
         if not target_url.startswith(('http://', 'https://')):
             self._send_text(handler, 400, 'Invalid media URL', send_body)
             return
@@ -623,10 +628,14 @@ class PreviewProxyServer:
                         pass
                     return
                 else:
-                    # Media chunk (TS / MP4): strip fake PNG header if present
+                    # Media chunk (TS / MP4): strip fake PNG header if present. When a
+                    # header is stripped the upstream Content-Length no longer matches the
+                    # bytes we send, so drop it and delimit the response by close instead.
+                    original_first = first_chunk
                     first_chunk = _strip_fake_header_data(first_chunk)
+                    stripped = len(first_chunk) != len(original_first)
                     handler.send_response(resp.status_code)
-                    self._forward_headers(handler, resp)
+                    self._forward_headers(handler, resp, drop_content_length=stripped)
                     handler.send_header('Accept-Ranges', 'bytes')
                     handler.send_header('Connection', 'close')
                     handler.end_headers()
@@ -692,7 +701,11 @@ class PreviewProxyServer:
                 pass
 
     @staticmethod
-    def _forward_headers(handler: BaseHTTPRequestHandler, resp: requests.Response) -> None:
+    def _forward_headers(
+        handler: BaseHTTPRequestHandler,
+        resp: requests.Response,
+        drop_content_length: bool = False,
+    ) -> None:
         forwarded = {
             'content-type',
             'content-length',
@@ -705,8 +718,11 @@ class PreviewProxyServer:
         }
         for key, value in resp.headers.items():
             key_l = str(key).lower()
-            if key_l in forwarded and key_l not in HOP_BY_HOP_HEADERS:
-                handler.send_header(str(key), str(value))
+            if key_l not in forwarded or key_l in HOP_BY_HOP_HEADERS:
+                continue
+            if drop_content_length and key_l == 'content-length':
+                continue
+            handler.send_header(str(key), str(value))
 
     @staticmethod
     def _send_text(

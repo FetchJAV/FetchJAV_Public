@@ -451,6 +451,19 @@ STRINGS = {
         'locate_folder_missing': '存放資料夾已不存在。',
         'locate_file_missing': '存放資料夾中找不到此檔案。',
 
+        # Close-while-running dialog
+        'close_dlg_title': '任務進行中',
+        'close_dlg_body': '下載與字幕仍在執行（下載 {downloads} 個、字幕 {subtitles} 個）。結束時要如何處理？',
+        'close_dlg_stay': '不離開',
+        'close_dlg_cancel_resume': '取消並於下次啟動自動續傳',
+        'close_dlg_background': '背景執行（縮到系統匣）',
+        'close_dlg_background_unavailable': '未安裝 pystray，無法使用背景執行。',
+        'tray_restore': '還原視窗',
+        'tray_exit_resume': '結束（下次續傳）',
+        'tray_tooltip': 'FetchJAV — 背景任務進行中',
+        'tray_done_title': '任務完成',
+        'tray_done_body': '所有下載與字幕都已完成。',
+
         # Site language prefixes
         'missav_lang': '',
         'supjav_lang': 'zh',
@@ -883,6 +896,19 @@ STRINGS = {
         'locate_folder_missing': 'Destination folder no longer exists.',
         'locate_file_missing': 'File is not present in the destination folder.',
 
+        # Close-while-running dialog
+        'close_dlg_title': 'Tasks are running',
+        'close_dlg_body': 'Downloads and subtitles are still running ({downloads} download(s), {subtitles} subtitle task(s)). What should happen when you leave?',
+        'close_dlg_stay': 'Do not leave',
+        'close_dlg_cancel_resume': 'Cancel and auto-resume on next launch',
+        'close_dlg_background': 'Run in background (minimize to tray)',
+        'close_dlg_background_unavailable': 'pystray is not installed, so background mode is unavailable.',
+        'tray_restore': 'Restore window',
+        'tray_exit_resume': 'Exit (resume later)',
+        'tray_tooltip': 'FetchJAV - tasks running in background',
+        'tray_done_title': 'Tasks finished',
+        'tray_done_body': 'All downloads and subtitles are complete.',
+
         # Site language prefixes
         'missav_lang': 'en',
         'supjav_lang': '',
@@ -1313,6 +1339,19 @@ STRINGS = {
         'locate_no_folder': '此项目尚未记录存放文件夹。',
         'locate_folder_missing': '存放文件夹已不存在。',
         'locate_file_missing': '存放文件夹中找不到此文件。',
+
+        # Close-while-running dialog
+        'close_dlg_title': '任务进行中',
+        'close_dlg_body': '下载与字幕仍在执行（下载 {downloads} 个、字幕 {subtitles} 个）。结束时要如何处理？',
+        'close_dlg_stay': '不离开',
+        'close_dlg_cancel_resume': '取消并在下次启动自动续传',
+        'close_dlg_background': '后台运行（缩到系统托盘）',
+        'close_dlg_background_unavailable': '未安装 pystray，无法使用后台运行。',
+        'tray_restore': '还原窗口',
+        'tray_exit_resume': '退出（下次续传）',
+        'tray_tooltip': 'FetchJAV - 后台任务进行中',
+        'tray_done_title': '任务完成',
+        'tray_done_body': '所有下载与字幕都已完成。',
 
         # Site language prefixes
         'missav_lang': 'cn',
@@ -1745,6 +1784,19 @@ STRINGS = {
         'locate_no_folder': 'この項目の保存先フォルダーは記録されていません。',
         'locate_folder_missing': '保存先フォルダーは存在しません。',
         'locate_file_missing': '保存先フォルダーにファイルがありません。',
+
+        # Close-while-running dialog
+        'close_dlg_title': '処理が実行中です',
+        'close_dlg_body': 'ダウンロード/字幕がまだ実行中です（DL {downloads}件、字幕 {subtitles}件）。終了時の動作を選択してください。',
+        'close_dlg_stay': '閉じない',
+        'close_dlg_cancel_resume': 'キャンセルして次回起動時に自動再開',
+        'close_dlg_background': 'バックグラウンドで実行（トレイへ）',
+        'close_dlg_background_unavailable': 'pystray がインストールされていないため、バックグラウンド実行は利用できません。',
+        'tray_restore': 'ウィンドウを表示',
+        'tray_exit_resume': '終了（後で再開）',
+        'tray_tooltip': 'FetchJAV - バックグラウンドで処理中',
+        'tray_done_title': '処理完了',
+        'tray_done_body': 'すべてのダウンロードと字幕が完了しました。',
 
         # Site language prefixes
         'missav_lang': 'ja',

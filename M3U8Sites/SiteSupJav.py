@@ -193,6 +193,37 @@ def _split_byte_ranges(total, workers=_DIRECT_RANGE_WORKERS):
     return ranges
 
 
+def _probe_m3u8(url, headers, timeout=(4, 8)):
+    """Return True only if a master playlist actually loads from the CDN.
+
+    Uses the same requests-style client the playback proxy uses, so a TLS or
+    network-level block on the CDN is caught here instead of the player stalling
+    on a black screen."""
+    if not url:
+        return False
+    resp = None
+    try:
+        resp = _get_session().get(
+            url,
+            headers=dict(headers or {}),
+            timeout=timeout,
+            allow_redirects=True,
+            **config.proxy_request_kwargs(),
+        )
+        if getattr(resp, 'status_code', 0) != 200:
+            return False
+        body = getattr(resp, 'text', '') or ''
+        return '#EXTM3U' in body[:4000]
+    except Exception:
+        return False
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
+
+
 def _parse_videos(soup):
     videos = []
     seen = set()
@@ -235,6 +266,11 @@ class SiteSupJav(M3U8Crawler):
 
     _direct_url = None
     _direct_referer = None
+    _prefer_site_default = False
+
+    def __init__(self, url, savepath="", silence=False, max_workers=None, prefer_site_default=False):
+        self._prefer_site_default = bool(prefer_site_default)
+        super().__init__(url, savepath=savepath, silence=silence, max_workers=max_workers)
 
     def get_url_infos(self):
         self._direct_url = None
@@ -256,9 +292,12 @@ class SiteSupJav(M3U8Crawler):
             m3u8url = None
             m3u8_headers = None
 
-            # 1) FST: downloadable HLS with real 480p/720p/1080p variants (#31).
             fst_key = next((k for k in servers if k.upper() in ('FST', 'FAST', 'FPLAYER', 'FC2STREAM')), None)
-            if fst_key:
+            st_key = next((k for k in servers if k.upper() in ('ST', 'STREAMTAPE', 'STPLAYER')), None)
+            tv_key = next((k for k in servers if k.upper() in ('TV', 'FAV', 'FAVJAV')), None)
+
+            def _try_fst():
+                nonlocal m3u8url, m3u8_headers
                 try:
                     fst = _fetch_server_gateway(scraper, servers[fst_key])
                     if fst is not None:
@@ -276,9 +315,24 @@ class SiteSupJav(M3U8Crawler):
                     m3u8url = None
                     m3u8_headers = None
 
-            # 2) Streamtape (ST): progressive MP4 fallback. Resolve it even when FST
-            #    works so an HLS failure can downgrade without rescanning the page.
-            st_key = next((k for k in servers if k.upper() in ('ST', 'STREAMTAPE', 'STPLAYER')), None)
+            def _try_tv():
+                nonlocal m3u8url, m3u8_headers
+                try:
+                    r2 = _fetch_server_gateway(scraper, servers[tv_key])
+                    if r2 is not None:
+                        if getattr(r2, 'status_code', 0) in (403, 429, 503):
+                            raise MirrorsBlockedError(_BLOCKED_MSG)
+                        m3u8url = _extract_m3u8(r2.text)
+                        if m3u8url:
+                            m3u8_headers = {'Referer': 'https://supjav.com/'}
+                except MirrorsBlockedError:
+                    raise
+                except Exception:
+                    m3u8url = None
+                    m3u8_headers = None
+
+            # 1) Streamtape (ST): progressive MP4 fallback. Resolve it even when an HLS
+            #    server works so a stream failure can downgrade without rescanning the page.
             if st_key:
                 try:
                     emb = _fetch_server_gateway(scraper, servers[st_key])
@@ -292,26 +346,31 @@ class SiteSupJav(M3U8Crawler):
                 except Exception:
                     pass
 
-            # 3) TV: last HLS fallback (its Google-backed segments often return 429).
-            #    Keep it for videos SupJav has not migrated to either FST or ST.
-            tv_key = next((k for k in servers if k.upper() in ('TV', 'FAV', 'FAVJAV')), None)
-            if not m3u8url and not self._direct_url and tv_key:
-                try:
-                    r2 = _fetch_server_gateway(scraper, servers[tv_key])
-                    if r2 is not None:
-                        if getattr(r2, 'status_code', 0) in (403, 429, 503):
-                            raise MirrorsBlockedError(_BLOCKED_MSG)
-                        m3u8url = _extract_m3u8(r2.text)
-                        if m3u8url:
-                            m3u8_headers = {'Referer': 'https://supjav.com/'}
-                except MirrorsBlockedError:
-                    raise
-                except Exception:
-                    m3u8url = None
+            # 2) Choose the HLS server. The site's player defaults to TV (its button is
+            #    marked `active` in the page markup); TV segments are tiktokcdn-backed and
+            #    load near-instantly. FST (fc2stream) offers real 480p/720p/1080p variants,
+            #    but its CDN is frequently geo-blocked or throttled even when the embed
+            #    parses fine.
+            #    - Playback mirrors the site: TV first, FST only as a last resort.
+            #    - Download keeps FST first for quality, but verifies the FST master
+            #      actually loads and falls back to TV when it is unreachable.
+            if getattr(self, '_prefer_site_default', False) and tv_key:
+                _try_tv()
+                if not m3u8url and fst_key:
+                    _try_fst()
+            else:
+                if fst_key:
+                    _try_fst()
+                    if m3u8url and not _probe_m3u8(m3u8url, m3u8_headers):
+                        print('\n[SupJav] FST stream unreachable; using the TV server instead.', flush=True)
+                        m3u8url = None
+                        m3u8_headers = None
+                if not m3u8url and tv_key:
+                    _try_tv()
 
             if not self._direct_url and not m3u8url:
                 raise Exception("此影片目前無可用下載來源"
-                                "（TV 區段受 Google 限制，且此片無 FST/Streamtape 備援）")
+                                "（FST/TV 區段無法存取，且此片無 Streamtape 備援）")
 
         title = _extract_title(soup)
         self._targetName = html.unescape(title)

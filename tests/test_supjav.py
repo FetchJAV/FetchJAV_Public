@@ -511,3 +511,224 @@ def test_create_m3u8_raises_on_zero_segments(monkeypatch):
 
     with pytest.raises(Exception):
         DummyCrawler()._create_m3u8()
+
+
+def test_probe_m3u8_true_when_playlist_loads(monkeypatch):
+    calls = []
+
+    class FakeSession:
+        def get(self, url, headers=None, timeout=None, allow_redirects=None, **kwargs):
+            calls.append((url, headers))
+            return _FakeResp(
+                200, {}, b'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\n720p.m3u8\n',
+                '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\n720p.m3u8\n',
+                url,
+            )
+
+    monkeypatch.setattr(supjav_mod, '_get_session', lambda: FakeSession())
+    assert supjav_mod._probe_m3u8('https://cdn.example/master.m3u8', {'Referer': 'https://supjav.com/'}) is True
+    assert calls[-1][0] == 'https://cdn.example/master.m3u8'
+    assert calls[-1][1] == {'Referer': 'https://supjav.com/'}
+
+
+def test_probe_m3u8_false_when_request_raises(monkeypatch):
+    class RaisingSession:
+        def get(self, *args, **kwargs):
+            raise OSError('connection blocked')
+
+    monkeypatch.setattr(supjav_mod, '_get_session', lambda: RaisingSession())
+    assert supjav_mod._probe_m3u8('https://cdn.example/master.m3u8', None) is False
+
+
+def test_probe_m3u8_false_on_non_200_or_non_playlist(monkeypatch):
+    class Session:
+        def __init__(self, resp):
+            self._resp = resp
+
+        def get(self, *args, **kwargs):
+            return self._resp
+
+    monkeypatch.setattr(
+        supjav_mod, '_get_session',
+        lambda: Session(_FakeResp(403, {}, b'denied', 'denied')),
+    )
+    assert supjav_mod._probe_m3u8('https://cdn.example/master.m3u8', None) is False
+
+    monkeypatch.setattr(
+        supjav_mod, '_get_session',
+        lambda: Session(_FakeResp(200, {}, b'<html>challenge</html>', '<html>challenge</html>')),
+    )
+    assert supjav_mod._probe_m3u8('https://cdn.example/master.m3u8', None) is False
+
+    assert supjav_mod._probe_m3u8(None, None) is False
+
+
+class _FakeSupJavPage:
+    """Response object shaped like the raw page fetch in get_url_infos."""
+
+    def __init__(self, text):
+        self.text = text
+        self.content = text.encode('utf-8')
+
+
+def _supjav_page_html():
+    return (
+        '<html><head><title>FC2PPV 4958738 Demo</title></head><body>'
+        '<h1>FC2PPV 4958738 Demo</h1>'
+        '<a href="javascript:;" class="btn-server active" data-link="vt">TV</a>'
+        '<a href="javascript:;" class="btn-server" data-link="tsf">FST</a>'
+        '<a href="javascript:;" class="btn-server" data-link="ts">ST</a>'
+        '</body></html>'
+    )
+
+
+class _FakeScraperCM:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def _patch_get_url_infos_deps(monkeypatch, probe_result, extract_m3u8_text):
+    page = _supjav_page_html()
+
+    def fake_fetch_mirrors(scraper, url, site_key, validate, timeout=30):
+        return _FakeSupJavPage(page), 'supjav', 'ok'
+
+    def fake_gateway(scraper, token):
+        if token == 'tsf':
+            return _FakeResp(200, {}, b'packed', 'packed',
+                             'https://lk1.supremejav.com/supjav.php?c=versfst')
+        if token == 'vt':
+            return _FakeResp(200, {}, b'urlPlay', extract_m3u8_text,
+                             'https://lk1.supremejav.com/supjav.php?c=vervtv')
+        return None
+
+    monkeypatch.setattr(supjav_mod, '_make_scraper', lambda: _FakeScraperCM())
+    monkeypatch.setattr(supjav_mod, 'fetch_with_mirrors', fake_fetch_mirrors)
+    monkeypatch.setattr(supjav_mod, '_fetch_server_gateway', fake_gateway)
+    monkeypatch.setattr(
+        supjav_mod, '_extract_packed_m3u8',
+        lambda text: 'https://fst.example/master.m3u8?t=1&s=2',
+    )
+    monkeypatch.setattr(supjav_mod, '_extract_m3u8', lambda text: 'https://cdn1.turboviplay.com/data1/x/x.m3u8')
+    monkeypatch.setattr(supjav_mod, '_probe_m3u8', lambda url, headers: probe_result)
+
+
+def test_get_url_infos_keeps_fst_when_probe_succeeds(monkeypatch):
+    _patch_get_url_infos_deps(monkeypatch, probe_result=True, extract_m3u8_text='ignored')
+
+    crawler = SiteSupJav.__new__(SiteSupJav)
+    crawler._url = 'https://supjav.com/449233.html'
+    crawler.get_url_infos()
+
+    assert crawler._m3u8url == 'https://fst.example/master.m3u8?t=1&s=2'
+    assert crawler._extra_headers['Referer'] == 'https://lk1.supremejav.com/supjav.php?c=versfst'
+    assert crawler._extra_headers['Origin'] == 'https://lk1.supremejav.com'
+
+
+def test_get_url_infos_falls_back_to_tv_when_fst_unreachable(monkeypatch):
+    _patch_get_url_infos_deps(
+        monkeypatch,
+        probe_result=False,
+        extract_m3u8_text="var urlPlay = 'https:\\/\\/cdn1.turboviplay.com\\/data1\\/x\\/x.m3u8';",
+    )
+
+    crawler = SiteSupJav.__new__(SiteSupJav)
+    crawler._url = 'https://supjav.com/449233.html'
+    crawler.get_url_infos()
+
+    assert crawler._m3u8url == 'https://cdn1.turboviplay.com/data1/x/x.m3u8'
+    assert crawler._extra_headers == {'Referer': 'https://supjav.com/'}
+
+
+def test_get_url_infos_uses_streamtape_when_fst_unreachable_and_no_tv(monkeypatch):
+    page = (
+        '<html><head><title>FC2PPV 0001</title></head><body>'
+        '<h1>FC2PPV 0001</h1>'
+        '<a href="javascript:;" class="btn-server" data-link="tsf">FST</a>'
+        '<a href="javascript:;" class="btn-server" data-link="ts">ST</a>'
+        '</body></html>'
+    )
+
+    def fake_fetch_mirrors(scraper, url, site_key, validate, timeout=30):
+        return _FakeSupJavPage(page), 'supjav', 'ok'
+
+    def fake_gateway(scraper, token):
+        if token == 'tsf':
+            return _FakeResp(200, {}, b'packed', 'packed',
+                             'https://lk1.supremejav.com/supjav.php?c=versfst')
+        if token == 'ts':
+            return _FakeResp(200, {}, b'emb', 'emb',
+                             'https://streamtape.com/e/abc')
+        return None
+
+    monkeypatch.setattr(supjav_mod, '_make_scraper', lambda: _FakeScraperCM())
+    monkeypatch.setattr(supjav_mod, 'fetch_with_mirrors', fake_fetch_mirrors)
+    monkeypatch.setattr(supjav_mod, '_fetch_server_gateway', fake_gateway)
+    monkeypatch.setattr(
+        supjav_mod, '_extract_packed_m3u8',
+        lambda text: 'https://fst.example/master.m3u8?t=1&s=2',
+    )
+    monkeypatch.setattr(supjav_mod, '_streamtape_direct_url', lambda text: 'https://streamtape.com/get_video?id=x')
+    monkeypatch.setattr(supjav_mod, '_probe_m3u8', lambda url, headers: False)
+
+    crawler = SiteSupJav.__new__(SiteSupJav)
+    crawler._url = 'https://supjav.com/1.html'
+    crawler.get_url_infos()
+
+    assert crawler._m3u8url is None
+    assert crawler._direct_url == 'https://streamtape.com/get_video?id=x'
+
+
+def test_get_url_infos_playback_prefers_tv_site_default_over_healthy_fst(monkeypatch):
+    # Playback mirrors the site's own player, which defaults to the TV server — even
+    # when FST is reachable and would pass the probe (FST probe result is True here).
+    _patch_get_url_infos_deps(
+        monkeypatch,
+        probe_result=True,
+        extract_m3u8_text="var urlPlay = 'https:\\/\\/cdn1.turboviplay.com\\/data1\\/x\\/x.m3u8';",
+    )
+
+    crawler = SiteSupJav.__new__(SiteSupJav)
+    crawler._prefer_site_default = True
+    crawler._url = 'https://supjav.com/449233.html'
+    crawler.get_url_infos()
+
+    assert crawler._m3u8url == 'https://cdn1.turboviplay.com/data1/x/x.m3u8'
+    assert crawler._extra_headers == {'Referer': 'https://supjav.com/'}
+
+
+def test_get_url_infos_playback_falls_back_to_fst_when_no_tv(monkeypatch):
+    page = (
+        '<html><head><title>FC2PPV 0002</title></head><body>'
+        '<h1>FC2PPV 0002</h1>'
+        '<a href="javascript:;" class="btn-server" data-link="tsf">FST</a>'
+        '</body></html>'
+    )
+
+    def fake_fetch_mirrors(scraper, url, site_key, validate, timeout=30):
+        return _FakeSupJavPage(page), 'supjav', 'ok'
+
+    def fake_gateway(scraper, token):
+        if token == 'tsf':
+            return _FakeResp(200, {}, b'packed', 'packed',
+                             'https://lk1.supremejav.com/supjav.php?c=versfst')
+        return None
+
+    monkeypatch.setattr(supjav_mod, '_make_scraper', lambda: _FakeScraperCM())
+    monkeypatch.setattr(supjav_mod, 'fetch_with_mirrors', fake_fetch_mirrors)
+    monkeypatch.setattr(supjav_mod, '_fetch_server_gateway', fake_gateway)
+    monkeypatch.setattr(
+        supjav_mod, '_extract_packed_m3u8',
+        lambda text: 'https://fst.example/master.m3u8?t=1&s=2',
+    )
+    monkeypatch.setattr(supjav_mod, '_probe_m3u8', lambda url, headers: True)
+
+    crawler = SiteSupJav.__new__(SiteSupJav)
+    crawler._prefer_site_default = True
+    crawler._url = 'https://supjav.com/2.html'
+    crawler.get_url_infos()
+
+    assert crawler._m3u8url == 'https://fst.example/master.m3u8?t=1&s=2'

@@ -2,6 +2,7 @@ import csv
 import os
 import sys
 import types
+import queue
 
 
 def _stub_runtime_dependency(name, factory=None):
@@ -40,7 +41,10 @@ _stub_runtime_dependency('customtkinter', _customtkinter_stub)
 
 import config
 import gui_modern
-from gui_modern import DownloadItem, DownloadManager, _select_persist, _visible_window
+from gui_modern import (
+    DownloadItem, DownloadManager, _DownloadTask,
+    _select_persist, _visible_window,
+)
 
 
 def _item(url, state):
@@ -263,7 +267,7 @@ def test_clear_then_save_writes_header_only(tmp_path):
         rows = list(csv.reader(f))
     assert rows == [[
         '狀態', '名稱', '進度', '速度', '網址', '目標',
-        '字幕來源證據',
+        '字幕來源證據', '續傳',
     ]]
 
 
@@ -383,4 +387,298 @@ def test_theme_mode_helpers_in_modern_app():
     assert app._theme_display_name('dark') == 'Dark Theme'
     assert app._theme_display_name('light') == 'Light Theme'
     assert app._theme_display_name('system') == 'System Theme'
+
+
+def test_csv_round_trip_preserves_resume_flag(tmp_path):
+    path = tmp_path / 'queue_resume.csv'
+    mgr = DownloadManager()
+    item = mgr.add_item('https://example.test/r0', state='未完成')
+    item.resume = True
+    mgr.save_csv(str(path))
+
+    loaded = DownloadManager()
+    loaded.load_csv(str(path))
+    restored = loaded.get_items()[0]
+
+    assert restored.resume is True
+    assert restored.state == '未完成'
+
+
+def test_csv_load_defaults_resume_flag_false_for_legacy_files(tmp_path):
+    path = tmp_path / 'queue_legacy.csv'
+    with open(path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['狀態', '名稱', '進度', '速度', '網址', '目標'])
+        writer.writerow(['未完成', 'Legacy', '0%', '',
+                         'https://example.test/r0', ''])
+
+    mgr = DownloadManager()
+    mgr.load_csv(str(path))
+
+    assert mgr.get_items()[0].resume is False
+
+
+def test_mark_inflight_for_resume_flags_active_states():
+    mgr = DownloadManager()
+    items = {}
+    for idx, state in enumerate([
+            '下載中', '等待中', '字幕準備中', '字幕辨識中', '字幕翻譯中']):
+        items[state] = mgr.add_item(
+            f'https://example.test/i{idx}', state=state)
+    mgr.add_item('https://example.test/done', state='已下載')
+    mgr.add_item('https://example.test/incomplete', state='未完成')
+
+    mgr.mark_inflight_for_resume()
+
+    by_state = {item.url: item for item in mgr.get_items()}
+    for state, item in items.items():
+        assert item.state == '未完成'
+        assert item.resume is True
+        assert item.speed == ''
+    assert by_state['https://example.test/done'].state == '已下載'
+    assert by_state['https://example.test/done'].resume is False
+    assert by_state['https://example.test/incomplete'].state == '未完成'
+    assert by_state['https://example.test/incomplete'].resume is False
+
+
+def test_auto_resume_pending_enqueues_only_flagged(monkeypatch):
+    mgr = DownloadManager()
+    flagged = mgr.add_item('https://example.test/flag', state='未完成')
+    flagged.resume = True
+    flagged.progress = 44
+    flagged.speed = '1 MB/s'
+    flagged.error = 'reset'
+    plain = mgr.add_item('https://example.test/plain', state='未完成')
+    calls = []
+    monkeypatch.setattr(
+        mgr, 'enqueue', lambda url, dest: calls.append((url, dest)))
+
+    mgr.auto_resume_pending()
+
+    assert calls == [('https://example.test/flag', 'download')]
+    assert flagged.resume is False
+    assert flagged.progress == 0
+    assert flagged.speed == ''
+    assert flagged.error == ''
+    assert plain.resume is False
+
+
+def test_auto_resume_pending_uses_item_dest(monkeypatch):
+    mgr = DownloadManager()
+    flagged = mgr.add_item(
+        'https://example.test/flag', state='未完成', dest=r'C:\Videos')
+    flagged.resume = True
+    calls = []
+    monkeypatch.setattr(
+        mgr, 'enqueue', lambda url, dest: calls.append((url, dest)))
+
+    mgr.auto_resume_pending()
+
+    assert calls == [('https://example.test/flag', r'C:\Videos')]
+
+
+def test_inflight_count_counts_active_and_pending():
+    mgr = DownloadManager()
+    assert mgr.inflight_count == 0
+    mgr._active['https://example.test/a'] = _DownloadTask(
+        'https://example.test/a', '', 0)
+    mgr._pending.append(_DownloadTask('https://example.test/b', '', 0))
+    mgr._subtitle_active['https://example.test/c'] = _DownloadTask(
+        'https://example.test/c', '', 0)
+    mgr._subtitle_pending.append(_DownloadTask('https://example.test/d', '', 0))
+
+    assert mgr.inflight_count == 4
+
+    mgr._active.pop('https://example.test/a')
+    assert mgr.inflight_count == 3
+
+
+def test_on_close_routes_by_inflight(monkeypatch):
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._is_closing = False
+    app._close_dlg = None
+    calls = []
+
+    class _Mgr:
+        inflight_count = 0
+
+    app._dlmgr = _Mgr()
+    monkeypatch.setattr(
+        app, '_do_close_quit', lambda: calls.append('quit'))
+    monkeypatch.setattr(
+        app, '_show_close_dialog', lambda: calls.append('dialog'))
+
+    app._on_close()
+    assert calls == ['quit']
+
+    calls.clear()
+    app._dlmgr = type('_F', (), {'inflight_count': 2})()
+    app._on_close()
+    assert calls == ['dialog']
+
+    calls.clear()
+    app._close_dlg = object()
+    app._on_close()
+    assert calls == []
+
+
+def test_do_close_quit_order_and_idempotency(monkeypatch):
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._is_closing = False
+    app._close_dlg = None
+    app._dl_drain_id = None
+    calls = []
+
+    class _Mgr:
+        def mark_inflight_for_resume(self):
+            calls.append('mark')
+
+        def save_csv(self, path):
+            calls.append('save')
+
+        def cancel_all(self, cleanup=False):
+            calls.append('cancel')
+
+    class _Exec:
+        def shutdown(self, **kwargs):
+            calls.append('thumb')
+
+    app._dlmgr = _Mgr()
+    app._thumb_executor = _Exec()
+    monkeypatch.setattr(app, '_stop_tray', lambda: calls.append('tray'))
+    monkeypatch.setattr(app, 'destroy', lambda: calls.append('destroy'))
+
+    app._do_close_quit()
+    assert calls == ['thumb', 'mark', 'save', 'cancel', 'tray', 'destroy']
+    assert app._is_closing is True
+
+    calls.clear()
+    app._do_close_quit()
+    assert calls == []
+
+
+def test_stop_tray_noops_without_tray():
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._tray_icon = None
+    app._tray_available = False
+    app._tray_cmd_drain_id = None
+    app._background_poll_id = None
+
+    app._stop_tray()
+
+    assert app._tray_icon is None
+    assert app._tray_available is False
+
+
+def _fake_pystray_module():
+    mod = types.ModuleType('pystray')
+    created = {}
+
+    class _MenuItem:
+        def __init__(self, text, action, default=False):
+            self.text = text
+            self.action = action
+            self.default = default
+
+    class _Menu:
+        SEPARATOR = object()
+
+        def __init__(self, *items):
+            self.items = items
+
+    class _Icon:
+        def __init__(self, name, image, title, menu):
+            created.update({
+                'name': name, 'image': image,
+                'title': title, 'menu': menu,
+            })
+
+        def run_detached(self):
+            created['detached'] = True
+
+        def stop(self):
+            created['stopped'] = True
+
+        def notify(self, message, title):
+            created['notified'] = (message, title)
+
+    mod.Menu = _Menu
+    mod.MenuItem = _MenuItem
+    mod.Icon = _Icon
+    return mod, created
+
+
+def test_ensure_tray_creates_detached_icon(monkeypatch):
+    fake_mod, created = _fake_pystray_module()
+    monkeypatch.setitem(sys.modules, 'pystray', fake_mod)
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._tray_icon = None
+    app._tray_available = False
+    app._tray_cmds = None
+    app._tray_cmd_drain_id = None
+    app._background_poll_id = None
+    app._window_hidden = False
+    app._is_closing = False
+    monkeypatch.setattr(app, '_arm_tray_cmd_drain', lambda: None)
+
+    app._ensure_tray()
+
+    assert app._tray_available is True
+    assert app._tray_icon is not None
+    assert created.get('detached') is True
+    assert created.get('name') == 'FetchJAV'
+    assert len(created['menu'].items) == 3
+
+
+def test_ensure_tray_handles_missing_pystray(monkeypatch):
+    def _no_pystray():
+        raise ImportError('no pystray')
+    monkeypatch.setitem(
+        sys.modules, 'pystray', None)
+    import builtins
+    real_import = builtins.__import__
+
+    def _blocked(name, *args, **kwargs):
+        if name == 'pystray':
+            raise ImportError('blocked')
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', _blocked)
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._tray_icon = None
+    app._tray_available = False
+    app._tray_cmds = None
+    app._tray_cmd_drain_id = None
+    app._background_poll_id = None
+    app._is_closing = False
+
+    app._ensure_tray()
+
+    assert app._tray_available is False
+    assert app._tray_icon is None
+
+
+def test_drain_tray_cmds_handles_restore_and_quit(monkeypatch):
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._tray_cmds = queue.Queue()
+    app._tray_icon = object()
+    app._tray_cmd_drain_id = None
+    app._is_closing = False
+    app._log = []
+    monkeypatch.setattr(app, '_arm_tray_cmd_drain', lambda: None)
+    monkeypatch.setattr(
+        app, '_restore_from_tray', lambda: app._log.append('restore'))
+    monkeypatch.setattr(
+        app, '_do_close_quit', lambda: app._log.append('quit'))
+
+    app._tray_cmds.put('restore')
+    app._tray_cmds.put('restore')
+    app._drain_tray_cmds()
+    assert app._log == ['restore', 'restore']
+
+    app._tray_cmds.put('quit')
+    app._drain_tray_cmds()
+    assert app._log == ['restore', 'restore', 'quit']
 

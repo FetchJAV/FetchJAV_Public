@@ -9,6 +9,8 @@ import io
 import csv
 import time
 import shutil
+import queue
+import importlib.util
 import webbrowser
 import threading
 import concurrent.futures
@@ -145,6 +147,9 @@ MAX_PERSIST_ROWS = 1000
 HARD_LOAD_LIMIT = 5000
 CSV_PATH = config.queue_csv_path()
 ERR_BLOCKED = '__cf_blocked__'
+INFLIGHT_STATES = frozenset({
+    '準備中', '下載中', '等待中', '字幕準備中', '字幕辨識中', '字幕翻譯中',
+})
 
 
 def _hex_to_rgb(h):
@@ -311,12 +316,12 @@ def _select_persist(items, cap):
 class DownloadItem:
     __slots__ = (
         'url', 'name', 'state', 'progress', 'speed', 'error', 'dest',
-        'source_subtitle_evidence',
+        'source_subtitle_evidence', 'resume',
     )
 
     def __init__(
             self, url: str, name: str = '', state: str = '', dest: str = '',
-            source_subtitle_evidence=()):
+            source_subtitle_evidence=(), resume: bool = False):
         self.url = url
         self.name = name or url.rstrip('/').split('/')[-1]
         self.state = state
@@ -324,6 +329,7 @@ class DownloadItem:
         self.speed = ''
         self.error = ''
         self.dest = dest or ''
+        self.resume = bool(resume)
         self.source_subtitle_evidence = trusted_chinese_subtitle_evidence({
             'url': url,
             '_source_subtitle_evidence': source_subtitle_evidence,
@@ -385,11 +391,12 @@ class DownloadManager:
 
     def add_item(
             self, url: str, name: str = '', state: str = '', dest: str = '',
-            source_subtitle_evidence=()):
+            source_subtitle_evidence=(), resume: bool = False):
         with self._lock:
             if url not in self._items:
                 self._items[url] = DownloadItem(
-                    url, name, state, dest, source_subtitle_evidence)
+                    url, name, state, dest, source_subtitle_evidence,
+                    resume=resume)
             else:
                 item = self._items.pop(url)
                 if name:
@@ -398,6 +405,7 @@ class DownloadManager:
                     item.state = state
                 if dest:
                     item.dest = dest
+                item.resume = bool(resume)
                 evidence = set(item.source_subtitle_evidence)
                 evidence.update(trusted_chinese_subtitle_evidence({
                     'url': url,
@@ -828,12 +836,13 @@ class DownloadManager:
             w = csv.writer(f)
             w.writerow([
                 '狀態', '名稱', '進度', '速度', '網址', '目標',
-                '字幕來源證據',
+                '字幕來源證據', '續傳',
             ])
             for item in items:
                 w.writerow([item.state, item.name, f'{item.progress}%',
                             item.speed, item.url, item.dest,
-                            '|'.join(item.source_subtitle_evidence)])
+                            '|'.join(item.source_subtitle_evidence),
+                            '1' if item.resume else '0'])
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)
@@ -857,6 +866,7 @@ class DownloadManager:
                             url, row.get('名稱', ''), state,
                             row.get('目標', ''),
                             row.get('字幕來源證據', ''))
+                        item.resume = (row.get('續傳') == '1')
                         progress = (row.get('進度', '') or '').rstrip('%')
                         try:
                             item.progress = int(float(progress))
@@ -896,6 +906,47 @@ class DownloadManager:
     def subtitle_pending_count(self) -> int:
         with self._lock:
             return len(self._subtitle_pending)
+
+    @property
+    def inflight_count(self) -> int:
+        """Total running or queued downloads and subtitle tasks."""
+        with self._lock:
+            return (
+                len(self._active) + len(self._pending)
+                + len(self._subtitle_active) + len(self._subtitle_pending))
+
+    def mark_inflight_for_resume(self):
+        """Persist-flag every running/queued task so it can resume on the
+        next launch. In-memory item states are reset to 未完成; the caller is
+        responsible for saving the CSV before cancelling the contexts."""
+        with self._lock:
+            for item in self._items.values():
+                if item.state in INFLIGHT_STATES:
+                    item.state = '未完成'
+                    item.speed = ''
+                    item.resume = True
+
+    def auto_resume_pending(self):
+        """Re-enqueue items previously flagged for resume (e.g. the app was
+        closed while tasks were running). Clears the flag so a later launch
+        does not resume them a second time."""
+        to_enqueue = []
+        with self._lock:
+            for item in self._items.values():
+                if item.resume and item.state in ('未完成', '已取消'):
+                    item.resume = False
+                    item.progress = 0
+                    item.speed = ''
+                    item.error = ''
+                    to_enqueue.append((item.url, item.dest or 'download'))
+        for url, dest in to_enqueue:
+            try:
+                self.enqueue(url, dest or 'download')
+            except Exception as exc:
+                try:
+                    print(f'[auto resume failed] {url}\n  {exc}', flush=True)
+                except Exception:
+                    pass
 
 
 # ── Browse helper ────────────────────────────────────────────────────
@@ -1437,6 +1488,13 @@ class ModernApp(ctk.CTk):
         self.minsize(980, 680)
         self.configure(fg_color=BG_DARK)
 
+        # Frameless window: the in-app header provides the window controls.
+        try:
+            self.overrideredirect(True)
+        except Exception:
+            pass
+        self._ensure_window_taskbar()
+
         # Set software window icon & AppUserModelID for Windows taskbar
         if sys.platform == 'win32':
             try:
@@ -1533,6 +1591,15 @@ class ModernApp(ctk.CTk):
         self._update_check_btn = None
         self._update_now_btn = None
 
+        # Background (close-to-tray) support
+        self._tray_icon = None
+        self._tray_available = False
+        self._tray_cmds = None
+        self._tray_cmd_drain_id = None
+        self._background_poll_id = None
+        self._window_hidden = False
+        self._close_dlg = None
+
         # Download manager
         self._dlmgr = DownloadManager(
             max_concurrent=config.get_download_concurrency())
@@ -1546,6 +1613,18 @@ class ModernApp(ctk.CTk):
                 except Exception:
                     pass
         self._dlmgr.load_csv(CSV_PATH)
+        # Auto-resume tasks that were running when the app was last closed.
+        try:
+            self._dlmgr.auto_resume_pending()
+        except Exception as exc:
+            try:
+                print(f'[auto resume failed] {exc}', flush=True)
+            except Exception:
+                pass
+        try:
+            self._dlmgr.save_csv(CSV_PATH)
+        except Exception:
+            pass
 
         # Load destination field icons (browse & open) and tag icon
         self._browse_icon = None
@@ -1646,6 +1725,63 @@ class ModernApp(ctk.CTk):
         self.after_idle(self._start_initial_background_tasks)
         if self._needs_lang_prompt:
             self.after(250, self._first_run_language_prompt)
+
+    def _ensure_window_taskbar(self):
+        """Give the frameless window a taskbar button (Windows only)."""
+        if sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            GWL_EXSTYLE = -20
+            WS_EX_APPWINDOW = 0x00040000
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if not (style & WS_EX_APPWINDOW):
+                ctypes.windll.user32.SetWindowLongW(
+                    hwnd, GWL_EXSTYLE, style | WS_EX_APPWINDOW)
+        except Exception:
+            pass
+
+    def _win_minimize(self):
+        if self._is_closing:
+            return
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+                # SW_MINIMIZE (wm iconify fails on override-redirect windows)
+                ctypes.windll.user32.ShowWindow(hwnd, 6)
+                return
+            except Exception:
+                pass
+        try:
+            self.iconify()
+        except Exception:
+            pass
+
+    def _win_toggle_maximize(self):
+        if self._is_closing:
+            return
+        try:
+            if self.state() == 'zoomed':
+                self.state('normal')
+            else:
+                self.state('zoomed')
+        except Exception:
+            pass
+        self._update_win_max_icon()
+
+    def _win_close(self):
+        self._on_close()
+
+    def _update_win_max_icon(self):
+        btn = getattr(self, '_win_btn_max', None)
+        if btn is None:
+            return
+        try:
+            btn.configure(text='❐' if self.state() == 'zoomed' else '□')
+        except Exception:
+            pass
 
     def _start_initial_background_tasks(self):
         if self._is_closing:
@@ -2168,6 +2304,7 @@ class ModernApp(ctk.CTk):
             logical_width = event.width
 
         self._update_responsive_nav(logical_width)
+        self._update_win_max_icon()
 
         if getattr(self, '_browse_mode', '') == 'preview':
             self._update_preview_layout(logical_width)
@@ -2673,6 +2810,59 @@ class ModernApp(ctk.CTk):
         right_info = ctk.CTkFrame(header, fg_color='transparent')
         right_info.pack(side='right', padx=16, fill='y')
         self._right_info_frame = right_info
+
+        # ── Frameless window controls (minimize / maximize / close) ─────────
+        # Packed first with side='right' so they land at the far right edge
+        # (close first => rightmost, matching the standard Windows order).
+        self._win_btn_close = ctk.CTkButton(
+            right_info, text='✕', width=36, height=36,
+            corner_radius=CONTROL_RADIUS, fg_color='transparent', border_width=0,
+            hover_color=ERROR_DIM, text_color=TEXT_SEC,
+            font=(ui_font(), 13, 'bold'), cursor='hand2',
+            command=self._win_close)
+        self._win_btn_close.pack(side='right', padx=(8, 0), pady=7)
+
+        self._win_btn_max = ctk.CTkButton(
+            right_info, text='□', width=36, height=36,
+            corner_radius=CONTROL_RADIUS, fg_color='transparent', border_width=0,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+            font=(ui_font(), 13, 'bold'), cursor='hand2',
+            command=self._win_toggle_maximize)
+        self._win_btn_max.pack(side='right', padx=(8, 0), pady=7)
+
+        self._win_btn_min = ctk.CTkButton(
+            right_info, text='─', width=36, height=36,
+            corner_radius=CONTROL_RADIUS, fg_color='transparent', border_width=0,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+            font=(ui_font(), 13, 'bold'), cursor='hand2',
+            command=self._win_minimize)
+        self._win_btn_min.pack(side='right', padx=(8, 0), pady=7)
+
+        # Drag-to-move + double-click-to-maximize on the empty header areas.
+        def _start_win_drag(event):
+            if self.state() == 'zoomed':
+                return
+            try:
+                self._win_drag_x = event.x_root - self.winfo_x()
+                self._win_drag_y = event.y_root - self.winfo_y()
+            except Exception:
+                pass
+
+        def _do_win_drag(event):
+            if self.state() == 'zoomed':
+                return
+            try:
+                self.geometry(
+                    f'+{event.x_root - self._win_drag_x}'
+                    f'+{event.y_root - self._win_drag_y}')
+            except Exception:
+                pass
+
+        for _drag_host in (header, right_info):
+            _drag_host.bind('<Button-1>', _start_win_drag, add='+')
+            _drag_host.bind('<B1-Motion>', _do_win_drag, add='+')
+            _drag_host.bind('<Double-Button-1>',
+                            lambda e: self._win_toggle_maximize(), add='+')
 
         ref_icon_obj = getattr(self, '_refresh_icon', None)
         ref_hover_icon_obj = getattr(self, '_refresh_icon_hover', None)
@@ -3743,9 +3933,9 @@ class ModernApp(ctk.CTk):
             return
 
         modal = ctk.CTkToplevel(self)
-        modal.title(T('subtitle_title'))
+        modal.overrideredirect(True)
         modal_w = 520
-        modal_h = 640
+        modal_h = 650
         try:
             self.update_idletasks()
             pw = self.winfo_width()
@@ -3757,18 +3947,86 @@ class ModernApp(ctk.CTk):
             modal.geometry(f"{modal_w}x{modal_h}+{x}+{y}")
         except Exception:
             modal.geometry(f"{modal_w}x{modal_h}")
-        modal.resizable(False, False)
+        # Use the base-class resizable: CTkToplevel.resizable() re-runs
+        # _windows_set_titlebar_color on Windows, which withdraws the window
+        # again and can leave it stuck hidden.
+        try:
+            tk.Toplevel.resizable(modal, False, False)
+        except Exception:
+            pass
         modal.transient(self)
+        modal.lift()
         modal.grab_set()
+        modal.focus_force()
         modal.configure(fg_color=BG_DARK)
-        if getattr(self, '_ico_path') and os.path.exists(self._ico_path):
+
+        def _close_modal():
             try:
-                modal.iconbitmap(self._ico_path)
+                modal.grab_release()
+            except Exception:
+                pass
+            try:
+                modal.destroy()
             except Exception:
                 pass
 
-        main_body = ctk.CTkFrame(modal, fg_color=BG_DARK, corner_radius=0)
-        main_body.pack(fill='both', expand=True, padx=16, pady=16)
+        modal.bind('<Escape>', lambda e: _close_modal(), add='+')
+
+        # Outer card container with clean boundary
+        container = ctk.CTkFrame(
+            modal, fg_color=BG_DARK, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        container.pack(fill='both', expand=True)
+
+        # ── In-Popup Header Bar with Title, CC Badge & Close Button ────────
+        header_bar = ctk.CTkFrame(
+            container, fg_color=BG_CARD, height=46, corner_radius=0
+        )
+        header_bar.pack(fill='x')
+        header_bar.pack_propagate(False)
+
+        header_left = ctk.CTkFrame(header_bar, fg_color='transparent')
+        header_left.pack(side='left', padx=14, pady=8)
+
+        cc_badge = ctk.CTkLabel(
+            header_left, text='CC', text_color=WHITE, fg_color=ACCENT,
+            corner_radius=4, height=22, width=28,
+            font=(ui_font(), 10, 'bold')
+        )
+        cc_badge.pack(side='left', padx=(0, 8))
+
+        title_lbl = ctk.CTkLabel(
+            header_left, text=T('subtitle_title'),
+            text_color=TEXT_PRI, font=(ui_font(), 13, 'bold')
+        )
+        title_lbl.pack(side='left')
+
+        close_btn = ctk.CTkButton(
+            header_bar, text='✕', width=30, height=30,
+            corner_radius=15, fg_color='transparent',
+            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+            font=(ui_font(), 13, 'bold'),
+            command=_close_modal
+        )
+        close_btn.pack(side='right', padx=10, pady=8)
+
+        # Draggable header bar for frameless popup
+        def _start_drag(event):
+            modal._drag_start_x = event.x_root - modal.winfo_x()
+            modal._drag_start_y = event.y_root - modal.winfo_y()
+
+        def _do_drag(event):
+            x = event.x_root - getattr(modal, '_drag_start_x', 0)
+            y = event.y_root - getattr(modal, '_drag_start_y', 0)
+            modal.geometry(f"+{x}+{y}")
+
+        for w in (header_bar, header_left, cc_badge, title_lbl):
+            w.bind('<Button-1>', _start_drag, add='+')
+            w.bind('<B1-Motion>', _do_drag, add='+')
+
+        main_body = ctk.CTkFrame(container, fg_color=BG_DARK, corner_radius=0)
+        main_body.pack(fill='both', expand=True, padx=16, pady=(12, 16))
 
         # ── Inline Tab Bar: Available Subtitles | Search Online | Sync with Audio ──
         tab_bar = ctk.CTkFrame(main_body, fg_color='transparent')
@@ -9247,7 +9505,228 @@ class ModernApp(ctk.CTk):
 
     # ── Close ────────────────────────────────────────────────────────
     def _on_close(self):
+        if self._is_closing:
+            return
+        if self._close_dlg is not None:
+            try:
+                self._close_dlg.lift()
+                self._close_dlg.focus_force()
+            except Exception:
+                pass
+            return
+        if self._dlmgr.inflight_count > 0:
+            self._show_close_dialog()
+            return
+        self._do_close_quit()
+
+    def _show_close_dialog(self):
+        if self._close_dlg is not None:
+            return
+        downloads = self._dlmgr.active_count + self._dlmgr.pending_count
+        subtitles = (
+            self._dlmgr.subtitle_active_count
+            + self._dlmgr.subtitle_pending_count)
+        try:
+            tray_supported = (
+                importlib.util.find_spec('pystray') is not None)
+        except Exception:
+            tray_supported = False
+
+        dlg = ctk.CTkToplevel(self)
+        try:
+            dlg.overrideredirect(True)
+            # Call the base-class resizable: CTkToplevel.resizable() re-runs
+            # _windows_set_titlebar_color on Windows, which withdraws the
+            # window again and can leave it stuck hidden.
+            tk.Toplevel.resizable(dlg, False, False)
+        except Exception:
+            pass
+        w, h = 540, 260
+        try:
+            self.update_idletasks()
+            pw = self.winfo_width()
+            ph = self.winfo_height()
+            px = self.winfo_rootx()
+            py = self.winfo_rooty()
+            x = max(0, px + (pw - w) // 2)
+            y = max(0, py + (ph - h) // 2)
+            dlg.geometry(f'{w}x{h}+{x}+{y}')
+        except Exception:
+            dlg.geometry(f'{w}x{h}')
+        dlg.transient(self)
+        dlg.configure(fg_color=BG_DARK)
+
+        def _stay():
+            self._close_dialog_done()
+
+        def _quit_resume():
+            self._close_dialog_done()
+            self._do_close_quit()
+
+        def _background():
+            self._close_dialog_done()
+            self._go_background()
+
+        dlg.bind('<Escape>', lambda e: _stay(), add='+')
+
+        # Outer card container with clean boundary
+        container = ctk.CTkFrame(
+            dlg, fg_color=BG_DARK, corner_radius=CARD_RADIUS,
+            border_width=1, border_color=BORDER_CARD
+        )
+        container.pack(fill='both', expand=True)
+
+        # ── In-Popup Header Bar with Logo, Title & Close Button ────────
+        header_bar = ctk.CTkFrame(
+            container, fg_color=BG_CARD, height=46, corner_radius=0
+        )
+        header_bar.pack(fill='x')
+        header_bar.pack_propagate(False)
+
+        header_left = ctk.CTkFrame(header_bar, fg_color='transparent')
+        header_left.pack(side='left', padx=14, pady=8)
+
+        # Load Logo
+        logo_img = getattr(self, '_brand_logo_img', None)
+        if not logo_img:
+            logo_png_p = os.path.join(os.path.dirname(__file__), 'logo.png')
+            if not os.path.exists(logo_png_p):
+                logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'logo.png')
+            if not os.path.exists(logo_png_p):
+                logo_png_p = os.path.join(os.path.dirname(__file__), 'img', 'favicon-256x256.png')
+            if os.path.exists(logo_png_p):
+                try:
+                    logo_pil = Image.open(logo_png_p)
+                    logo_img = ctk.CTkImage(light_image=logo_pil, dark_image=logo_pil, size=(24, 24))
+                except Exception:
+                    logo_img = None
+
+        if logo_img:
+            logo_lbl = ctk.CTkLabel(header_left, image=logo_img, text='')
+            logo_lbl.pack(side='left', padx=(0, 8))
+        else:
+            logo_lbl = None
+
+        title_lbl = ctk.CTkLabel(
+            header_left, text=T('close_dlg_title'),
+            text_color=TEXT_PRI, font=(ui_font(), 13, 'bold')
+        )
+        title_lbl.pack(side='left')
+
+        close_btn = ctk.CTkButton(
+            header_bar, text='✕', width=30, height=30,
+            corner_radius=15, fg_color='transparent',
+            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+            font=(ui_font(), 13, 'bold'),
+            command=_stay
+        )
+        close_btn.pack(side='right', padx=10, pady=8)
+
+        # Draggable header bar for frameless popup
+        def _start_drag(event):
+            dlg._drag_start_x = event.x_root - dlg.winfo_x()
+            dlg._drag_start_y = event.y_root - dlg.winfo_y()
+
+        def _do_drag(event):
+            x = event.x_root - getattr(dlg, '_drag_start_x', 0)
+            y = event.y_root - getattr(dlg, '_drag_start_y', 0)
+            dlg.geometry(f"+{x}+{y}")
+
+        drag_widgets = [header_bar, header_left, title_lbl]
+        if logo_lbl:
+            drag_widgets.append(logo_lbl)
+        for w_item in drag_widgets:
+            w_item.bind('<Button-1>', _start_drag, add='+')
+            w_item.bind('<B1-Motion>', _do_drag, add='+')
+
+        # Dialog body
+        body = ctk.CTkFrame(container, fg_color='transparent')
+        body.pack(fill='both', expand=True, padx=20, pady=(14, 16))
+
+        ctk.CTkLabel(
+            body, text=T(
+                'close_dlg_body', downloads=downloads,
+                subtitles=subtitles),
+            font=(ui_font(), 12), text_color=TEXT_SEC, anchor='w',
+            justify='left', wraplength=490
+        ).pack(fill='x', pady=(0, 16))
+
+        btns = ctk.CTkFrame(body, fg_color='transparent')
+        btns.pack(fill='x')
+
+        action_row = ctk.CTkFrame(btns, fg_color='transparent')
+        action_row.pack(fill='x', pady=(0, 8))
+        action_row.grid_columnconfigure(0, weight=1)
+        action_row.grid_columnconfigure(1, weight=1)
+
+        stay_btn = ctk.CTkButton(
+            action_row, text=T('close_dlg_stay'), height=38,
+            fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=WHITE,
+            corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 12, 'bold'), command=_stay
+        )
+        stay_btn.grid(row=0, column=0, sticky='ew', padx=(0, 5))
+
+        quit_resume_btn = ctk.CTkButton(
+            action_row, text=T('close_dlg_cancel_resume'), height=38,
+            fg_color='transparent', border_width=1, border_color=ERROR_C,
+            hover_color=ERROR_DIM, text_color=ERROR_C,
+            corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 11, 'bold'), command=_quit_resume
+        )
+        quit_resume_btn.grid(row=0, column=1, sticky='ew', padx=(5, 0))
+
+        bg_btn = ctk.CTkButton(
+            btns, text=T('close_dlg_background'), height=36,
+            fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+            corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 12), command=_background)
+        bg_btn.pack(fill='x', pady=(0, 4))
+        if not tray_supported:
+            bg_btn.configure(state='disabled')
+            ctk.CTkLabel(
+                body, text=T('close_dlg_background_unavailable'),
+                font=(ui_font(), 11), text_color=TEXT_DIM, anchor='w',
+                justify='left', wraplength=490
+            ).pack(fill='x', pady=(4, 0))
+
+        self._close_dlg = dlg
+        try:
+            # CTkToplevel hides itself while it applies the Windows titlebar
+            # colour, so re-show it explicitly before grabbing input.
+            dlg.deiconify()
+            dlg.update_idletasks()
+            dlg.attributes('-topmost', True)
+            dlg.lift()
+            dlg.focus_force()
+            dlg.grab_set()
+        except Exception:
+            pass
+        try:
+            dlg.after(1500, lambda: (
+                dlg.winfo_exists() and dlg.attributes('-topmost', False)))
+        except Exception:
+            pass
+
+    def _close_dialog_done(self):
+        dlg = self._close_dlg
+        self._close_dlg = None
+        if dlg is not None:
+            try:
+                dlg.grab_release()
+            except Exception:
+                pass
+            try:
+                dlg.destroy()
+            except Exception:
+                pass
+
+    def _do_close_quit(self):
+        if self._is_closing:
+            return
         self._is_closing = True
+        self._close_dialog_done()
         if self._dl_drain_id:
             try:
                 self.after_cancel(self._dl_drain_id)
@@ -9259,16 +9738,177 @@ class ModernApp(ctk.CTk):
         except Exception:
             pass
         try:
-            with self._dlmgr._lock:
-                for item in self._dlmgr._items.values():
-                    if item.state in ('準備中', '下載中', '等待中'):
-                        item.state = '未完成'
-                        item.speed = ''
-                self._dlmgr.save_csv(CSV_PATH)
+            self._dlmgr.mark_inflight_for_resume()
         except Exception:
             pass
-        self._dlmgr.cancel_all(cleanup=False)
-        self.destroy()
+        try:
+            self._dlmgr.save_csv(CSV_PATH)
+        except Exception:
+            pass
+        try:
+            self._dlmgr.cancel_all(cleanup=False)
+        except Exception:
+            pass
+        self._stop_tray()
+        try:
+            self.destroy()
+        except Exception:
+            pass
+
+    def _go_background(self):
+        if self._is_closing:
+            return
+        self._ensure_tray()
+        self._window_hidden = True
+        try:
+            fs_win = getattr(self, '_fs_win', None)
+            if fs_win is not None and getattr(self, '_exit_fullscreen_player', None):
+                self._exit_fullscreen_player()
+        except Exception:
+            pass
+        try:
+            self.withdraw()
+        except Exception:
+            pass
+        self._arm_background_poll()
+
+    def _restore_from_tray(self):
+        if self._is_closing:
+            return
+        self._window_hidden = False
+        self._cancel_background_poll()
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
+
+    def _arm_background_poll(self):
+        self._cancel_background_poll()
+        try:
+            self._background_poll_id = self.after(
+                2000, self._poll_background)
+        except tk.TclError:
+            self._background_poll_id = None
+
+    def _cancel_background_poll(self):
+        pid = self._background_poll_id
+        if pid:
+            try:
+                self.after_cancel(pid)
+            except Exception:
+                pass
+            self._background_poll_id = None
+
+    def _poll_background(self):
+        self._background_poll_id = None
+        if self._is_closing:
+            return
+        try:
+            if self._dlmgr.inflight_count == 0:
+                self._notify_background_done()
+                if not self._tray_available:
+                    self._restore_from_tray()
+                return
+        except Exception:
+            pass
+        self._arm_background_poll()
+
+    def _notify_background_done(self):
+        try:
+            if self._tray_icon is not None:
+                self._tray_icon.notify(
+                    T('tray_done_body'), T('tray_done_title'))
+        except Exception:
+            pass
+
+    def _ensure_tray(self):
+        if self._tray_icon is not None:
+            return
+        try:
+            import pystray
+        except Exception:
+            self._tray_available = False
+            return
+        icon_path = os.path.join(
+            os.path.dirname(__file__), 'img', 'favicon-256x256.png')
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(
+                os.path.dirname(__file__), 'img', 'favicon.ico')
+        if not os.path.exists(icon_path):
+            self._tray_available = False
+            return
+        try:
+            image = Image.open(icon_path)
+            if self._tray_cmds is None:
+                self._tray_cmds = queue.Queue()
+            menu = pystray.Menu(
+                pystray.MenuItem(
+                    T('tray_restore'),
+                    lambda icon, item: self._tray_cmds.put('restore'),
+                    default=True),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem(
+                    T('tray_exit_resume'),
+                    lambda icon, item: self._tray_cmds.put('quit')),
+            )
+            icon = pystray.Icon('FetchJAV', image, T('tray_tooltip'), menu)
+            icon.run_detached()
+            self._tray_icon = icon
+            self._tray_available = True
+            self._arm_tray_cmd_drain()
+        except Exception:
+            self._tray_available = False
+            self._tray_icon = None
+
+    def _arm_tray_cmd_drain(self):
+        self._cancel_tray_cmd_drain()
+        try:
+            self._tray_cmd_drain_id = self.after(
+                400, self._drain_tray_cmds)
+        except tk.TclError:
+            self._tray_cmd_drain_id = None
+
+    def _cancel_tray_cmd_drain(self):
+        pid = self._tray_cmd_drain_id
+        if pid:
+            try:
+                self.after_cancel(pid)
+            except Exception:
+                pass
+            self._tray_cmd_drain_id = None
+
+    def _drain_tray_cmds(self):
+        self._tray_cmd_drain_id = None
+        if self._is_closing:
+            return
+        q = self._tray_cmds
+        if q is not None:
+            try:
+                while True:
+                    cmd = q.get_nowait()
+                    if cmd == 'restore':
+                        self._restore_from_tray()
+                    elif cmd == 'quit':
+                        self._do_close_quit()
+                        return
+            except queue.Empty:
+                pass
+        if self._tray_icon is not None and not self._is_closing:
+            self._arm_tray_cmd_drain()
+
+    def _stop_tray(self):
+        self._cancel_tray_cmd_drain()
+        self._cancel_background_poll()
+        icon = self._tray_icon
+        self._tray_icon = None
+        self._tray_available = False
+        if icon is not None:
+            try:
+                icon.stop()
+            except Exception:
+                pass
 
 
 def gui_modern_main(url: str = '', dest: str = 'download', lang: str = 'en'):

@@ -47,14 +47,25 @@ def VaildateUrl(url):
     return None
 
 
-def CreateSite(url, savepath="", silence=False, max_workers=None):
+import inspect
+
+
+def CreateSite(url, savepath="", silence=False, max_workers=None, prefer_site_default=False):
     site = VaildateUrl(url)
     if site is None: return None
+    kwargs = {}
+    if prefer_site_default:
+        try:
+            params = inspect.signature(site.__init__).parameters
+        except (ValueError, TypeError):
+            params = {}
+        if 'prefer_site_default' in params:
+            kwargs['prefer_site_default'] = True
     if max_workers is None:
-        return site(url, savepath=savepath, silence=silence)
+        return site(url, savepath=savepath, silence=silence, **kwargs)
     return site(
         url, savepath=savepath, silence=silence,
-        max_workers=max_workers)
+        max_workers=max_workers, **kwargs)
 
 
 def CreateSiteUrlList(url, silence=False):

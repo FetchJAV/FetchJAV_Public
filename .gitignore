@@ -12,6 +12,8 @@ crash_log.txt
 crash_native.log
 startup.log
 build_tmp/
+build/
+dist/
 
 # Download output & temporary directories
 download/
