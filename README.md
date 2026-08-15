@@ -36,8 +36,8 @@ Browse, search, and filter videos across **JableTV**, **MissAV**, and **SupJav**
 
 ---
 
-### 2. Real-Time Streaming Video Preview
-Watch full streams directly inside FetchJAV before downloading! Built-in local HTTP streaming proxy automatically handles HTTP range requests, repairs segmented TS/MP4 chunks, and strips anti-scraping fake headers on the fly.
+### 2. Real-Time Streaming Video Preview & CC Subtitle Player
+Watch full streams directly inside FetchJAV before downloading! Built-in local HTTP streaming proxy automatically handles HTTP range requests, repairs segmented TS/MP4 chunks, and strips anti-scraping fake headers on the fly. Includes an integrated **Closed Caption (CC)** menu with online subtitle search across multiple providers, local `.srt`/`.vtt` loading, audio speech sync, and highlighted track switching.
 
 <p align="center">
   <img src="./img/screenshots/01_streaming_preview.png" width="100%" alt="Real-Time Streaming Video Preview" />
@@ -191,8 +191,8 @@ When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/
   <img src="./img/screenshots/02_browse_gallery.png" width="100%" alt="多平台瀏覽圖庫" />
 </p>
 
-#### 2. 即時影片串流預覽
-下載前可直接在軟體內點擊串流播放！內建本機 HTTP 串流代理伺服器，即時轉發 Range 請求並自動修復分段檔頭。
+#### 2. 即時影片串流預覽與 CC 字幕播放器
+下載前可直接在軟體內點擊串流播放！內建本機 HTTP 串流代理伺服器，即時轉發 Range 請求並自動修復分段檔頭。更整合強大 **CC 字幕選單**，支援跨站線上搜尋、本機字幕載入、時間軸微調與選中軌道高亮顯示。
 <p align="center">
   <img src="./img/screenshots/01_streaming_preview.png" width="100%" alt="即時串流預覽" />
 </p>

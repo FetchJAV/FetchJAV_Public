@@ -36,8 +36,8 @@ Browse, search, and filter videos across **JableTV**, **MissAV**, and **SupJav**
 
 ---
 
-### 2. Real-Time Streaming Video Preview
-Watch full streams directly inside FetchJAV before downloading! Built-in local HTTP streaming proxy automatically handles HTTP range requests, repairs segmented TS/MP4 chunks, and strips anti-scraping fake headers on the fly.
+### 2. Real-Time Streaming Video Preview & CC Subtitle Player
+Watch full streams directly inside FetchJAV before downloading! Built-in local HTTP streaming proxy automatically handles HTTP range requests, repairs segmented TS/MP4 chunks, and strips anti-scraping fake headers on the fly. Includes an integrated **Closed Caption (CC)** menu with online subtitle search across multiple providers, local `.srt`/`.vtt` loading, audio speech sync, and highlighted track switching.
 
 <p align="center">
   <img src="./img/screenshots/01_streaming_preview.png" width="100%" alt="Real-Time Streaming Video Preview" />
