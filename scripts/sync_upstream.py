@@ -29,11 +29,14 @@ Per-file decision
      - shared file (text)                  -> 3-way merge; conflicts flagged
      - shared file (binary)                -> keep ours, flag for review
 4. Upstream deleted a file we kept         -> keep it (never delete FetchJAV work),
-                                              flag when it was an upstream file
+                                               flag when it was an upstream file
 5. Upstream added a new file               -> adopt it
 6. We added a file upstream lacks          -> keep it
 
-Ownership rules live in docs/sync/ownership.json.
+Ownership rules live in docs/sync/ownership.json. In addition, the "preserve"
+map re-inserts FetchJAV-kept feature blocks (e.g. --hot-reload CLI flags) that
+upstream removed from a shared file, so a kept feature never silently disappears
+with an upstream refactor.
 
 Safety guarantees
 -----------------
@@ -149,12 +152,13 @@ def worktree_clean(include_untracked):
 # --------------------------------------------------------------------------- #
 
 def load_ownership():
-    rules = {'fetchjav_owned': [], 'upstream_owned': []}
+    rules = {'fetchjav_owned': [], 'upstream_owned': [], 'preserve': {}}
     if OWNERSHIP_FILE.exists():
         try:
             data = json.loads(OWNERSHIP_FILE.read_text(encoding='utf-8'))
             for cls in ('fetchjav_owned', 'upstream_owned'):
                 rules[cls] = list(data.get(cls) or [])
+            rules['preserve'] = dict(data.get('preserve') or {})
         except Exception as exc:  # pragma: no cover - config is trusted
             raise SyncError(f'cannot parse {OWNERSHIP_FILE}: {exc}')
     return rules
@@ -175,6 +179,10 @@ def print_ownership():
         print(f'\n[{cls}]')
         for pat in rules.get(cls, []):
             print(f'  {pat}')
+    if rules.get('preserve'):
+        print('\n[preserve]')
+        for path, blocks in rules['preserve'].items():
+            print(f'  {path}: {len(blocks)} block(s)')
 
 
 # --------------------------------------------------------------------------- #
@@ -200,6 +208,58 @@ def three_way_merge(base_data, ours_data, theirs_data, path, tmp):
     return proc.returncode == 0, merged
 
 
+def _find_block(lines, block):
+    """Return index of the first contiguous run of `block` in `lines`, or None."""
+    n = len(block)
+    for i in range(len(lines) - n + 1):
+        if lines[i:i + n] == block:
+            return i
+    return None
+
+
+def apply_preserve(base_data, result_data, preserve_rules):
+    """Re-insert FetchJAV-kept feature blocks that upstream removed.
+
+    A preserve rule is {'lines': [..], 'insert_before': '<anchor>'}. A block is
+    only restored when it existed in the fork base (an inherited feature FetchJAV
+    keeps) and is missing from the upstream-derived result. Returns
+    (data, restored_count); data is the input untouched when nothing changes.
+    """
+    if not preserve_rules or not base_data or not result_data:
+        return result_data, 0
+    if is_binary(base_data) or is_binary(result_data):
+        return result_data, 0
+    try:
+        base_lines = base_data.decode('utf-8').splitlines()
+        result_lines = result_data.decode('utf-8').splitlines()
+    except UnicodeDecodeError:
+        return result_data, 0
+    restored = 0
+    for rule in preserve_rules:
+        block = list(rule.get('lines') or [])
+        if not block:
+            continue
+        if _find_block(base_lines, block) is None:
+            continue          # not inherited -> let the 3-way merge decide
+        if _find_block(result_lines, block) is not None:
+            continue          # already present
+        idx = None
+        anchor = rule.get('insert_before')
+        if anchor:
+            for i, ln in enumerate(result_lines):
+                if anchor in ln:
+                    idx = i
+                    break
+        if idx is None:
+            result_lines = [ln for ln in result_lines if ln.strip()] + [''] + block
+        else:
+            result_lines = result_lines[:idx] + block + [''] + result_lines[idx:]
+        restored += 1
+    if restored:
+        return ('\n'.join(result_lines) + '\n').encode('utf-8'), restored
+    return result_data, 0
+
+
 # --------------------------------------------------------------------------- #
 # sync engine
 # --------------------------------------------------------------------------- #
@@ -209,6 +269,7 @@ def plan_sync(base_ref, theirs_ref, rules, tmp):
     base_files = tree_files(base_ref)
     ours_files = tree_files('HEAD')
     theirs_files = tree_files(theirs_ref)
+    preserve_rules = rules.get('preserve') or {}
 
     ops = []          # dicts describing actions
     reviews = []      # (severity, path, message)
@@ -268,18 +329,31 @@ def plan_sync(base_ref, theirs_ref, rules, tmp):
 
         if not ours_changed:
             # Upstream changed a file FetchJAV did not touch.
+            if theirs_data is None:
+                reviews.append((
+                    'keep', path,
+                    f'upstream deleted this file; FetchJAV still has it ({cls}). '
+                    'Keep.'))
+                continue
             if cls == 'fetchjav_owned':
-                if theirs_data is None:
-                    msg = ('upstream deleted this file; FetchJAV keeps its own '
-                           'copy. NOT deleted.')
-                else:
-                    msg = ('upstream changed a fetchjav-owned file; NOT '
-                           'overwritten. Review manually and extract backend '
-                           'improvements if any.')
-                reviews.append(('review', path, msg))
+                reviews.append(('review', path,
+                                'upstream changed a fetchjav-owned file; NOT '
+                                'overwritten. Review manually and extract backend '
+                                'improvements if any.'))
             else:
-                ops.append({'action': 'adopt', 'path': path,
-                            'ref': theirs_ref, 'note': f'upstream change ({cls})'})
+                data, restored = apply_preserve(
+                    base_data, theirs_data, preserve_rules.get(path) or [])
+                op = {'action': 'adopt', 'path': path,
+                      'ref': theirs_ref, 'note': f'upstream change ({cls})'}
+                if restored:
+                    op['data'] = data
+                    op['note'] = ('upstream change (shared); preserved '
+                                  'FetchJAV-kept block(s)')
+                    reviews.append((
+                        'review', path,
+                        f'preserve map restored {restored} FetchJAV-kept block(s) '
+                        'that upstream removed. Verify the result.'))
+                ops.append(op)
             continue
 
         # Both sides changed.
@@ -293,8 +367,18 @@ def plan_sync(base_ref, theirs_ref, rules, tmp):
         ok, merged = three_way_merge(base_data, ours_data, theirs_data, path, tmp)
         if ok:
             if merged != ours_data:
-                ops.append({'action': 'merge', 'path': path, 'data': merged,
-                            'note': '3-way merge (clean)'})
+                data, restored = apply_preserve(
+                    base_data, merged, preserve_rules.get(path) or [])
+                op = {'action': 'merge', 'path': path, 'data': data,
+                      'note': '3-way merge (clean)'}
+                if restored:
+                    op['note'] = ('3-way merge (clean); preserved '
+                                  'FetchJAV-kept block(s)')
+                    reviews.append((
+                        'review', path,
+                        f'preserve map restored {restored} FetchJAV-kept block(s) '
+                        'that upstream removed. Verify the result.'))
+                ops.append(op)
             else:
                 noops.append(path)
         else:
@@ -317,7 +401,9 @@ def apply_ops(ops, reviews, theirs_ref, dry_run):
     for op in ops:
         path = REPO_ROOT / op['path']
         if op['action'] == 'adopt':
-            data = blob_content(op['ref'], op['path'])
+            data = op.get('data')
+            if data is None:
+                data = blob_content(op['ref'], op['path'])
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             # -f so gitignored paths (e.g. build_tmp/) can be tracked.
