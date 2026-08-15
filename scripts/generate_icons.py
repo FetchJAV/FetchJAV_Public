@@ -236,6 +236,7 @@ def main():
     bulb_d = "M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"
     search_d = "M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607z"
     compass_d = "M12 22A10 10 0 1 0 12 2a10 10 0 0 0 0 20z M16.24 7.76l-2.12 6.36-6.36 2.12 2.12-6.36 6.36-2.12z"
+    globe_d = "M12 22A10 10 0 1 0 12 2a10 10 0 0 0 0 20z M2 12h20 M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
     download_d = "M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
     settings_d = "M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"
     browse_d = "M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44z"
@@ -251,11 +252,15 @@ def main():
     render_svg(search_d, stroke_color=(235, 235, 240, 255), stroke_width=2.0, target_size=48).save(os.path.join(img_dir, 'icon_sub_search_dark.png'))
     render_svg(search_d, stroke_color=(45, 45, 55, 255), stroke_width=2.0, target_size=48).save(os.path.join(img_dir, 'icon_sub_search_light.png'))
 
-    # Compass icon variants (High visibility & contrast for Search From All toggle)
-    render_svg(compass_d, stroke_color=(215, 215, 225, 255), stroke_width=1.9, target_size=32).save(os.path.join(img_dir, 'icon_compass_dark.png'))
-    render_svg(compass_d, stroke_color=(50, 50, 60, 255), stroke_width=1.9, target_size=32).save(os.path.join(img_dir, 'icon_compass_light.png'))
+    # Compass icon variants (Dull default, bright high-contrast on hover)
+    render_svg(compass_d, stroke_color=(135, 130, 125, 255), stroke_width=1.7, target_size=32).save(os.path.join(img_dir, 'icon_compass_dark.png'))
+    render_svg(compass_d, stroke_color=(150, 145, 140, 255), stroke_width=1.7, target_size=32).save(os.path.join(img_dir, 'icon_compass_light.png'))
+    render_svg(compass_d, stroke_color=(255, 255, 255, 255), stroke_width=2.0, target_size=32).save(os.path.join(img_dir, 'icon_compass_hover_dark.png'))
+    render_svg(compass_d, stroke_color=(25, 25, 30, 255), stroke_width=2.0, target_size=32).save(os.path.join(img_dir, 'icon_compass_hover_light.png'))
     render_svg(compass_d, stroke_color=(255, 51, 102, 255), stroke_width=2.0, target_size=32, fill_color=(255, 51, 102, 100)).save(os.path.join(img_dir, 'icon_compass_on_dark.png'))
     render_svg(compass_d, stroke_color=(235, 40, 90, 255), stroke_width=2.0, target_size=32, fill_color=(235, 40, 90, 100)).save(os.path.join(img_dir, 'icon_compass_on_light.png'))
+    render_svg(compass_d, stroke_color=(255, 90, 135, 255), stroke_width=2.2, target_size=32, fill_color=(255, 90, 135, 150)).save(os.path.join(img_dir, 'icon_compass_on_hover_dark.png'))
+    render_svg(compass_d, stroke_color=(255, 40, 90, 255), stroke_width=2.2, target_size=32, fill_color=(255, 40, 90, 150)).save(os.path.join(img_dir, 'icon_compass_on_hover_light.png'))
 
     # Refresh icon variants
     render_svg(refresh_d, stroke_color=(175, 175, 185, 255), stroke_width=1.8, target_size=32).save(os.path.join(img_dir, 'icon_refresh_dark.png'))
@@ -267,16 +272,16 @@ def main():
     render_svg(bulb_d, stroke_color=(180, 185, 195, 255), stroke_width=1.8, target_size=32).save(os.path.join(img_dir, 'icon_bulb_off.png'))
     render_svg(bulb_d, stroke_color=(217, 119, 6, 255), stroke_width=1.8, target_size=32, fill_color=(251, 191, 36, 220)).save(os.path.join(img_dir, 'icon_bulb_on.png'))
 
-    # Navigation tabs (Explore, Download, Settings)
-    render_svg(compass_d, stroke_color=(255, 51, 102, 255), stroke_width=2.0, target_size=64, fill_color=(255, 51, 102, 80)).save(os.path.join(img_dir, 'icon_explore_active.png'))
-    render_svg(compass_d, stroke_color=(150, 150, 160, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_explore_inactive.png'))
+    # Navigation tabs (Explore: wireframe earth with outline only, Download, Settings)
+    render_svg(globe_d, stroke_color=(255, 51, 102, 255), stroke_width=2.0, target_size=64).save(os.path.join(img_dir, 'icon_explore_active.png'))
+    render_svg(globe_d, stroke_color=(140, 140, 150, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_explore_inactive.png'))
 
     render_svg(download_d, stroke_color=(255, 51, 102, 255), stroke_width=2.0, target_size=64).save(os.path.join(img_dir, 'icon_download_active.png'))
-    render_svg(download_d, stroke_color=(150, 150, 160, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_download_inactive.png'))
+    render_svg(download_d, stroke_color=(140, 140, 150, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_download_inactive.png'))
     render_svg(download_d, stroke_color=(255, 255, 255, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_dl_white.png'))
 
     render_svg(settings_d, stroke_color=(255, 51, 102, 255), stroke_width=2.0, target_size=64).save(os.path.join(img_dir, 'icon_settings_active.png'))
-    render_svg(settings_d, stroke_color=(150, 150, 160, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_settings_inactive.png'))
+    render_svg(settings_d, stroke_color=(140, 140, 150, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_settings_inactive.png'))
 
     # Folder Browse icon
     render_svg(browse_d, stroke_color=(220, 220, 230, 255), stroke_width=1.8, target_size=64).save(os.path.join(img_dir, 'icon_browse_dark.png'))

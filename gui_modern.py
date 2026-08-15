@@ -2732,25 +2732,46 @@ class ModernApp(ctk.CTk):
         except Exception:
             pass
 
-        # Load compass icon (Search From All toggle; light/dark + off/on variants)
+        # Load compass icon (Search From All toggle; light/dark + off/on + idle/hover variants)
         self._compass_icon = None
+        self._compass_icon_hover = None
         self._compass_icon_active = None
+        self._compass_icon_active_hover = None
         img_dir_c = _resolve_resource_path('img')
         comp_light_p = os.path.join(img_dir_c, 'icon_compass_light.png')
         comp_dark_p = os.path.join(img_dir_c, 'icon_compass_dark.png')
+        comp_hover_light_p = os.path.join(img_dir_c, 'icon_compass_hover_light.png')
+        comp_hover_dark_p = os.path.join(img_dir_c, 'icon_compass_hover_dark.png')
         comp_on_light_p = os.path.join(img_dir_c, 'icon_compass_on_light.png')
         comp_on_dark_p = os.path.join(img_dir_c, 'icon_compass_on_dark.png')
+        comp_on_hov_light_p = os.path.join(img_dir_c, 'icon_compass_on_hover_light.png')
+        comp_on_hov_dark_p = os.path.join(img_dir_c, 'icon_compass_on_hover_dark.png')
         try:
             if os.path.exists(comp_light_p) and os.path.exists(comp_dark_p):
                 self._compass_icon = ctk.CTkImage(
                     light_image=Image.open(comp_light_p),
                     dark_image=Image.open(comp_dark_p),
                     size=(20, 20))
+            if os.path.exists(comp_hover_light_p) and os.path.exists(comp_hover_dark_p):
+                self._compass_icon_hover = ctk.CTkImage(
+                    light_image=Image.open(comp_hover_light_p),
+                    dark_image=Image.open(comp_hover_dark_p),
+                    size=(20, 20))
+            elif self._compass_icon:
+                self._compass_icon_hover = self._compass_icon
+
             if os.path.exists(comp_on_light_p) and os.path.exists(comp_on_dark_p):
                 self._compass_icon_active = ctk.CTkImage(
                     light_image=Image.open(comp_on_light_p),
                     dark_image=Image.open(comp_on_dark_p),
                     size=(20, 20))
+            if os.path.exists(comp_on_hov_light_p) and os.path.exists(comp_on_hov_dark_p):
+                self._compass_icon_active_hover = ctk.CTkImage(
+                    light_image=Image.open(comp_on_hov_light_p),
+                    dark_image=Image.open(comp_on_hov_dark_p),
+                    size=(20, 20))
+            elif self._compass_icon_active:
+                self._compass_icon_active_hover = self._compass_icon_active
         except Exception:
             pass
 
@@ -2788,7 +2809,7 @@ class ModernApp(ctk.CTk):
         except Exception:
             pass
 
-        # Load tab icons
+        # Load tab icons (Sleek, refined size for Explore, Download, Settings)
         self._nav_icons = {}
         img_dir = _resolve_resource_path('img')
         for key in self._tab_keys:
@@ -2800,8 +2821,8 @@ class ModernApp(ctk.CTk):
                     act_img = Image.open(act_p)
                     inact_img = Image.open(inact_p)
                     self._nav_icons[key] = {
-                        'active': ctk.CTkImage(light_image=act_img, dark_image=act_img, size=(24, 24)),
-                        'inactive': ctk.CTkImage(light_image=inact_img, dark_image=inact_img, size=(24, 24))
+                        'active': ctk.CTkImage(light_image=act_img, dark_image=act_img, size=(18, 18)),
+                        'inactive': ctk.CTkImage(light_image=inact_img, dark_image=inact_img, size=(18, 18))
                     }
             except Exception:
                 pass
@@ -2818,8 +2839,8 @@ class ModernApp(ctk.CTk):
                 tab_nav, text=f" {tab_labels[key]}",
                 image=icon_obj, compound='left',
                 fg_color='transparent', hover=False,
-                text_color=TEXT_SEC, font=(ui_font(), 14, 'bold'),
-                cursor='hand2', height=42, corner_radius=0,
+                text_color=TEXT_SEC, font=(ui_font(), 13, 'bold'),
+                cursor='hand2', height=36, corner_radius=0,
                 command=lambda k=key: (self._select_tab(k), self._set_browse_mode('grid')) if k == 'browse' else self._select_tab(k)
             )
             btn.pack(side='left', padx=0, fill='y')
@@ -3093,9 +3114,10 @@ class ModernApp(ctk.CTk):
             icon_lbl = ctk.CTkLabel(search_box, text="🔍", text_color=TEXT_SEC)
             icon_lbl.pack(side='right', padx=(2, 8))
 
-        # Compass toggle — Search From All (search every site in one page)
+        # Compass toggle — Search From All (dull by default, brightened on hover)
         compass_obj = getattr(self, '_compass_icon', None)
         self._compass_lbl = None
+        self._compass_hovered = False
         if compass_obj is not None:
             compass_lbl = ctk.CTkLabel(search_box, text="", image=compass_obj,
                                        width=28, height=28)
@@ -3106,6 +3128,18 @@ class ModernApp(ctk.CTk):
             except Exception:
                 pass
             self._compass_lbl = compass_lbl
+
+            def _on_comp_enter(e):
+                self._compass_hovered = True
+                self._update_search_all_indicator()
+
+            def _on_comp_leave(e):
+                self._compass_hovered = False
+                self._update_search_all_indicator()
+
+            compass_lbl.bind('<Enter>', _on_comp_enter)
+            compass_lbl.bind('<Leave>', _on_comp_leave)
+
             ToolTip(compass_lbl, lambda: (
                 T('search_all_tip_on') if self._search_all_mode else T('search_all_tip_off')))
         self._update_search_all_indicator()
@@ -8185,12 +8219,17 @@ class ModernApp(ctk.CTk):
         self._update_search_all_indicator()
 
     def _update_search_all_indicator(self):
-        """Sync the compass icon color to the search-all state (icon only)."""
+        """Sync the compass icon color to the search-all state and hover status."""
         lbl = getattr(self, '_compass_lbl', None)
         if lbl is not None:
             try:
-                icon = (getattr(self, '_compass_icon_active', None)
-                        if self._search_all_mode else getattr(self, '_compass_icon', None))
+                is_hovered = getattr(self, '_compass_hovered', False)
+                if self._search_all_mode:
+                    icon = (getattr(self, '_compass_icon_active_hover', None) or getattr(self, '_compass_icon_active', None)
+                            if is_hovered else getattr(self, '_compass_icon_active', None))
+                else:
+                    icon = (getattr(self, '_compass_icon_hover', None)
+                            if is_hovered else getattr(self, '_compass_icon', None))
                 if icon is not None:
                     lbl.configure(image=icon)
             except Exception:
