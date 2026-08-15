@@ -95,6 +95,26 @@ list. It leaves you on the sync branch so you can inspect `git diff`.
 `--commit` commits the integrated result on the sync branch, but only if there
 are no conflicts and all tests pass. Safer to leave it off and review first.
 
+## Pitfall: never `git reset --hard` right after a sync run
+
+During a real (non-`--dry-run`) sync the tool force-stages upstream's
+`build_tmp/*` files (`git add -f`), because they are gitignored on `main` but
+tracked upstream. If you then discard the sync branch with
+`git switch main && git reset --hard`, those files are removed from the index
+**and deleted from disk** — destroying your local untracked `build_tmp/`
+copies and breaking the build-system tests
+(`tests/test_ui_theme.py::test_windows_version_resources_match_app_version`,
+`test_windows_distribution_is_hardened_and_verifiable`).
+
+- To discard a sync branch without committing: `git switch main; git reset`
+  (mixed reset — keeps worktree) then `git restore --staged --worktree .`
+  for any remaining tracked diffs. Do **not** use `git reset --hard`.
+- If the files were already lost, restore them from upstream:
+  `git checkout upstream/master -- build_tmp/gen_version.py build_tmp/JableTV_Modern.spec build_tmp/JableTV_Modern.version build_tmp/Jable_smalltool.spec build_tmp/Jable_smalltool.version`
+  (upstream's content satisfies the FetchJAV build tests), then unstage:
+  `git reset HEAD build_tmp/`.
+- Prefer `--dry-run` for planning so nothing is staged or deleted.
+
 ## Exit codes / safety guarantees
 
 - The tool requires a clean tracked worktree (untracked files are allowed).
