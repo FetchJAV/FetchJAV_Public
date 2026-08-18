@@ -10,9 +10,10 @@ headers = {
 }
 
 MIRRORS = {
-    'missav': ['missav.ai', 'missav.ws', 'missav123.com', 'missav.live'],
-    'jable':  ['jable.tv', 'fs1.app'],
-    'supjav': ['supjav.com', 'supjav.net', 'supjav.org'],
+    'missav':  ['missav.ai', 'missav.ws', 'missav123.com', 'missav.live'],
+    'jable':   ['jable.tv', 'fs1.app'],
+    'supjav':  ['supjav.com', 'supjav.net', 'supjav.org'],
+    'hanime1': ['hanime1.me'],
 }
 
 
@@ -24,6 +25,8 @@ def site_name_from_url(url: str) -> str:
         return 'MissAV'
     if 'supjav' in host:
         return 'SupJav'
+    if 'hanime1' in host:
+        return 'Hanime1'
     return host or 'Video'
 
 _cf_lock = threading.Lock()

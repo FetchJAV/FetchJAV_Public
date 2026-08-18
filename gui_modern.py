@@ -129,6 +129,7 @@ from ssl_util import SharedSSLAdapter, get_shared_ssl_context
 from M3U8Sites.SiteJableTV import JableTVBrowser
 from M3U8Sites.SiteMissAV import MissAVBrowser
 from M3U8Sites.SiteSupJav import SupJavBrowser
+from M3U8Sites.SiteHanime1 import Hanime1Browser
 from M3U8Sites.M3U8Crawler import MirrorsBlockedError
 from config import headers
 from locales import T, set_lang, get_lang, ui_font, LANGUAGES, state_label
@@ -224,6 +225,7 @@ SITES = {
     'JableTV': {'browser': JableTVBrowser},
     'MissAV': {'browser': MissAVBrowser},
     'SupJav': {'browser': SupJavBrowser},
+    'Hanime1': {'browser': Hanime1Browser},
 }
 
 _ALL_SITE_KEYS = tuple(SITES.keys())
@@ -1314,6 +1316,8 @@ def _fetch_actress_portrait(url: str) -> Optional[Image.Image]:
 
 
 class SiteSelectorBar(ctk.CTkFrame):
+    _DROPDOWN_THRESHOLD = 3
+
     def __init__(self, master, sites, selected, command=None, **kwargs):
         super().__init__(
             master,
@@ -1326,29 +1330,53 @@ class SiteSelectorBar(ctk.CTkFrame):
         self.command = command
         self.selected = selected
         self.buttons = {}
-        for s in self.sites:
-            btn = ctk.CTkButton(
-                self, text=s, width=64, height=30,
-                corner_radius=6,
-                font=(ui_font(), 11, 'bold'),
-                command=lambda site=s: self.set_selected(site, trigger_command=True))
-            btn.pack(side='left', padx=2, pady=3)
-            self.buttons[s] = btn
-        self.set_selected(selected, trigger_command=False)
+        self._dropdown = None
+
+        if len(sites) > self._DROPDOWN_THRESHOLD:
+            self._site_var = ctk.StringVar(value=selected)
+            self._dropdown = ctk.CTkOptionMenu(
+                self, variable=self._site_var, values=list(sites),
+                command=self._on_dropdown_change, width=120, height=30,
+                corner_radius=6, font=(ui_font(), 11, 'bold'),
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER,
+                text_color=ACCENT,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE,
+                dynamic_resizing=False)
+            self._dropdown.pack(padx=4, pady=3)
+        else:
+            for s in self.sites:
+                btn = ctk.CTkButton(
+                    self, text=s, width=64, height=30,
+                    corner_radius=6,
+                    font=(ui_font(), 11, 'bold'),
+                    command=lambda site=s: self.set_selected(site, trigger_command=True))
+                btn.pack(side='left', padx=2, pady=3)
+                self.buttons[s] = btn
+            self.set_selected(selected, trigger_command=False)
+
+    def _on_dropdown_change(self, value):
+        self.selected = value
+        if self.command:
+            self.command(value)
 
     def set_selected(self, site, trigger_command=False):
         self.selected = site
-        for s, btn in self.buttons.items():
-            if s == site:
-                btn.configure(
-                    fg_color=('#FDE8EC', '#2B161B'),
-                    hover_color=('#FAD2DB', '#3F1F26'),
-                    text_color=ACCENT)
-            else:
-                btn.configure(
-                    fg_color='transparent',
-                    hover_color=BG_CARD_HOVER,
-                    text_color=TEXT_SEC)
+        if self._dropdown:
+            self._dropdown.set(site)
+        else:
+            for s, btn in self.buttons.items():
+                if s == site:
+                    btn.configure(
+                        fg_color=('#FDE8EC', '#2B161B'),
+                        hover_color=('#FAD2DB', '#3F1F26'),
+                        text_color=ACCENT)
+                else:
+                    btn.configure(
+                        fg_color='transparent',
+                        hover_color=BG_CARD_HOVER,
+                        text_color=TEXT_SEC)
         if trigger_command and self.command:
             self.command(site)
 
@@ -1543,6 +1571,8 @@ class ModernApp(ctk.CTk):
                 pass
 
         _ico_candidates = [
+            _resolve_resource_path(os.path.join('img', 'logo21', 'logo21_multi.ico')),
+            _resolve_resource_path(os.path.join('img', 'logo21', 'logo21_256x256.ico')),
             _resolve_resource_path('logo.ico'),
             _resolve_resource_path(os.path.join('img', 'favicon.ico')),
         ]
@@ -2639,7 +2669,9 @@ class ModernApp(ctk.CTk):
         brand.pack(side='left', padx=16, fill='y')
 
         self._brand_logo_lbl = None
-        logo_png_p = _resolve_resource_path('logo.png')
+        logo_png_p = _resolve_resource_path(os.path.join('img', 'logo_only.png'))
+        if not os.path.exists(logo_png_p):
+            logo_png_p = _resolve_resource_path('logo.png')
         if not os.path.exists(logo_png_p):
             logo_png_p = _resolve_resource_path(os.path.join('img', 'logo.png'))
         if not os.path.exists(logo_png_p):
@@ -2647,19 +2679,19 @@ class ModernApp(ctk.CTk):
 
         if os.path.exists(logo_png_p):
             try:
-                logo_pil = Image.open(logo_png_p)
+                logo_pil = Image.open(logo_png_p).rotate(90, expand=True)
                 self._brand_logo_img = ctk.CTkImage(
                     light_image=logo_pil,
                     dark_image=logo_pil,
-                    size=(28, 28)
+                    size=(22, 22)
                 )
                 self._brand_logo_lbl = ctk.CTkLabel(brand, image=self._brand_logo_img, text='')
-                self._brand_logo_lbl.pack(side='left', padx=(0, 8))
+                self._brand_logo_lbl.pack(side='left', padx=(0, 6))
             except Exception:
                 pass
 
         self._brand_lbl_fetch = ctk.CTkLabel(brand, text='Fetch',
-                                             font=(ui_font(), 20, 'bold'),
+                                             font=(ui_font(), 17, 'bold'),
                                              text_color=TEXT_PRI)
         self._brand_lbl_fetch.pack(side='left')
 
@@ -2674,17 +2706,17 @@ class ModernApp(ctk.CTk):
             self._jav_ctk_img = ctk.CTkImage(
                 light_image=jav_light_img,
                 dark_image=jav_dark_img,
-                size=(38, 20)
+                size=(32, 17)
             )
             self._brand_lbl_jav = ctk.CTkLabel(brand, image=self._jav_ctk_img, text='')
         else:
             self._brand_lbl_jav = ctk.CTkLabel(brand, text='JAV',
-                                               font=(ui_font(), 20, 'bold'),
+                                               font=(ui_font(), 17, 'bold'),
                                                text_color=ACCENT)
         self._brand_lbl_jav.pack(side='left', padx=(1, 0))
 
         self._brand_lbl = ctk.CTkLabel(brand, text='',
-                                       font=(ui_font(), 16, 'bold'),
+                                       font=(ui_font(), 14, 'bold'),
                                        text_color=ACCENT)
         self._brand_lbl.pack(side='left', padx=(4, 0))
 
@@ -2879,6 +2911,8 @@ class ModernApp(ctk.CTk):
             font=(ui_font(), 13, 'bold'), cursor='hand2',
             command=self._win_close)
         self._win_btn_close.pack(side='right', padx=(8, 0), pady=7)
+        self._win_btn_close.bind('<Enter>', lambda e: self._win_btn_close.configure(text_color=ERROR_C), add='+')
+        self._win_btn_close.bind('<Leave>', lambda e: self._win_btn_close.configure(text_color=TEXT_SEC), add='+')
 
         self._win_btn_max = ctk.CTkButton(
             right_info, text='□', width=36, height=36,
@@ -2887,6 +2921,8 @@ class ModernApp(ctk.CTk):
             font=(ui_font(), 13, 'bold'), cursor='hand2',
             command=self._win_toggle_maximize)
         self._win_btn_max.pack(side='right', padx=(8, 0), pady=7)
+        self._win_btn_max.bind('<Enter>', lambda e: self._win_btn_max.configure(text_color=WHITE), add='+')
+        self._win_btn_max.bind('<Leave>', lambda e: self._win_btn_max.configure(text_color=TEXT_SEC), add='+')
 
         self._win_btn_min = ctk.CTkButton(
             right_info, text='─', width=36, height=36,
@@ -2895,6 +2931,8 @@ class ModernApp(ctk.CTk):
             font=(ui_font(), 13, 'bold'), cursor='hand2',
             command=self._win_minimize)
         self._win_btn_min.pack(side='right', padx=(8, 0), pady=7)
+        self._win_btn_min.bind('<Enter>', lambda e: self._win_btn_min.configure(text_color=WHITE), add='+')
+        self._win_btn_min.bind('<Leave>', lambda e: self._win_btn_min.configure(text_color=TEXT_SEC), add='+')
 
         # Drag-to-move + double-click-to-maximize on the empty header areas.
         def _start_win_drag(event):
@@ -7071,9 +7109,113 @@ class ModernApp(ctk.CTk):
             view_content.pack(fill='both', expand=True)
             dl_content.pack_forget()
 
+        def render_sources_page(container):
+            grp = ctk.CTkFrame(container, fg_color='transparent')
+            grp.pack(fill='both', expand=True, padx=(0, 18))
+
+            grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
+            grp_hdr.pack(fill='x', pady=(0, 8))
+            ctk.CTkLabel(grp_hdr, text='Sources',
+                         font=(ui_font(), 15, 'bold'),
+                         text_color=TEXT_PRI).pack(side='left')
+            ctk.CTkFrame(grp, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 14))
+
+            ctk.CTkLabel(grp, text='Activate or deactivate video sources. '
+                         'Deactivated sources are removed from the site selector.',
+                         text_color=TEXT_DIM,
+                         font=(ui_font(), 10)).pack(anchor='w', pady=(0, 12))
+
+            _all_site_names = list(SITES.keys())
+            if not hasattr(self, '_inactive_sites'):
+                self._inactive_sites = set()
+
+            _BTN_INACTIVE_BORDER = BORDER_HOVER
+            _BTN_ACTIVE_BORDER = ACCENT
+            _BTN_ACTIVE_BG = ('#FDE8EC', '#2B161B')
+            _BTN_INACTIVE_BG = 'transparent'
+            _BTN_INACTIVE_TEXT = TEXT_DIM
+            _BTN_ACTIVE_TEXT = ACCENT
+
+            self._source_btns = {}
+            self._source_status_lbls = {}
+
+            for site_name in _all_site_names:
+                row = ctk.CTkFrame(grp, fg_color='transparent')
+                row.pack(fill='x', pady=4)
+
+                is_active = site_name not in self._inactive_sites
+
+                status_lbl = ctk.CTkLabel(
+                    row, text='●' if is_active else '○',
+                    text_color=ACCENT if is_active else TEXT_DIM,
+                    font=(ui_font(), 10, 'bold'), width=20)
+                status_lbl.pack(side='left', padx=(0, 8))
+                self._source_status_lbls[site_name] = status_lbl
+
+                def _make_toggle(name=site_name):
+                    def _toggle():
+                        if name in self._inactive_sites:
+                            self._inactive_sites.discard(name)
+                        else:
+                            self._inactive_sites.add(name)
+                        self._rebuild_site_selector()
+                        self._refresh_source_btn_styles()
+                    return _toggle
+
+                btn = ctk.CTkButton(
+                    row, text=site_name, width=120, height=32,
+                    corner_radius=CONTROL_RADIUS,
+                    border_width=2,
+                    border_color=_BTN_ACTIVE_BORDER if is_active else _BTN_INACTIVE_BORDER,
+                    fg_color=_BTN_ACTIVE_BG if is_active else _BTN_INACTIVE_BG,
+                    text_color=_BTN_ACTIVE_TEXT if is_active else _BTN_INACTIVE_TEXT,
+                    hover_color=_BTN_ACTIVE_BG if is_active else BG_CARD_HOVER,
+                    font=(ui_font(), 11, 'bold'),
+                    command=_make_toggle())
+                btn.pack(side='left')
+                self._source_btns[site_name] = btn
+
+            def _refresh_source_btn_styles(self_ref=self):
+                for name, b in self_ref._source_btns.items():
+                    is_active = name not in self_ref._inactive_sites
+                    try:
+                        b.configure(
+                            border_color=_BTN_ACTIVE_BORDER if is_active else _BTN_INACTIVE_BORDER,
+                            fg_color=_BTN_ACTIVE_BG if is_active else _BTN_INACTIVE_BG,
+                            text_color=_BTN_ACTIVE_TEXT if is_active else _BTN_INACTIVE_TEXT,
+                            hover_color=_BTN_ACTIVE_BG if is_active else BG_CARD_HOVER,
+                        )
+                    except Exception:
+                        pass
+                for name, lbl in self_ref._source_status_lbls.items():
+                    is_active = name not in self_ref._inactive_sites
+                    try:
+                        lbl.configure(
+                            text='●' if is_active else '○',
+                            text_color=ACCENT if is_active else TEXT_DIM)
+                    except Exception:
+                        pass
+
+            self._refresh_source_btn_styles = _refresh_source_btn_styles
+
+            def _activate_all():
+                self._inactive_sites.clear()
+                self._rebuild_site_selector()
+                self._refresh_source_btn_styles()
+
+            ctk.CTkFrame(grp, height=1, fg_color=BORDER).pack(fill='x', pady=(14, 10))
+            ctk.CTkButton(
+                grp, text='Enable All Sources', width=180, height=32,
+                corner_radius=CONTROL_RADIUS,
+                border_width=2, border_color=ACCENT,
+                fg_color=ACCENT_DIM, hover_color=BG_CARD_HOVER,
+                text_color=ACCENT, font=(ui_font(), 11, 'bold'),
+                command=_activate_all).pack(anchor='w')
+
         self._settings_page_renderers = {
             'update': render_update_page,
             'general': render_general_page,
+            'sources': render_sources_page,
             'saved': render_saved_page,
             'history': render_history_page,
             'subtitle': render_subtitle_page,
@@ -7088,6 +7230,7 @@ class ModernApp(ctk.CTk):
         self._settings_categories = [
             ('update', '', T('update_settings_title') if 'update_settings_title' in T.__code__.co_varnames else 'Update'),
             ('general', '', T('general_settings_title') if 'general_settings_title' in T.__code__.co_varnames else 'General'),
+            ('sources', '', 'Sources'),
             ('saved', '', T('saved_settings_title') if 'saved_settings_title' in T.__code__.co_varnames else 'Saved'),
             ('history', '', T('history_settings_title')),
             ('download', '', T('download_settings')),
@@ -7382,11 +7525,35 @@ class ModernApp(ctk.CTk):
         if not self._videos:
             if self._browse_blocked:
                 msg = T('mirrors_blocked')
+                ctk.CTkLabel(self._grid_scroll, text=msg,
+                             text_color=TEXT_DIM,
+                             font=(ui_font(), 14)).pack(pady=40)
+            elif not self._browse_empty_message:
+                _home_logo_p = _resolve_resource_path(os.path.join('img', 'logo_only.png'))
+                if not os.path.exists(_home_logo_p):
+                    _home_logo_p = _resolve_resource_path('logo.png')
+                if os.path.exists(_home_logo_p):
+                    try:
+                        _home_pil = Image.open(_home_logo_p)
+                        _home_logo_img = ctk.CTkImage(
+                            light_image=_home_pil, dark_image=_home_pil,
+                            size=(80, 80))
+                        ctk.CTkLabel(self._grid_scroll, image=_home_logo_img,
+                                     text='').pack(pady=(60, 8))
+                    except Exception:
+                        pass
+                ctk.CTkLabel(self._grid_scroll, text='FetchJAV',
+                             text_color=ACCENT,
+                             font=(ui_font(), 22, 'bold')).pack(pady=(0, 4))
+                ctk.CTkLabel(self._grid_scroll,
+                             text=T('no_results') if self._page > 1 else '',
+                             text_color=TEXT_DIM,
+                             font=(ui_font(), 13)).pack(pady=(0, 20))
             else:
-                msg = self._browse_empty_message or T('no_results')
-            ctk.CTkLabel(self._grid_scroll, text=msg,
-                         text_color=TEXT_DIM,
-                         font=(ui_font(), 14)).pack(pady=40)
+                msg = self._browse_empty_message
+                ctk.CTkLabel(self._grid_scroll, text=msg,
+                             text_color=TEXT_DIM,
+                             font=(ui_font(), 14)).pack(pady=40)
             return
 
         # Responsive card density: 1 narrow / 2 compact / 3 default / 4 wide.
@@ -8238,6 +8405,30 @@ class ModernApp(ctk.CTk):
                     self._selected_source_subtitle_evidence[url] = evidence
                 self._set_card_selected(url, True)
         self._update_selection_count()
+
+    def _rebuild_site_selector(self):
+        inactive = getattr(self, '_inactive_sites', set())
+        active_sites = [k for k in SITES.keys() if k not in inactive]
+        if not active_sites:
+            active_sites = list(SITES.keys())
+            self._inactive_sites.clear()
+
+        old_menu = getattr(self, '_site_menu', None)
+        if old_menu:
+            try:
+                old_menu.pack_forget()
+                old_menu.destroy()
+            except Exception:
+                pass
+
+        if self._site_key not in active_sites:
+            self._site_key = active_sites[0]
+
+        self._site_menu = SiteSelectorBar(
+            self._top_toolbar_row1, sites=active_sites,
+            selected=self._site_key,
+            command=self._on_site_change)
+        self._site_menu.pack(side='left', before=self._cat_menu)
 
     def _on_site_change(self, val):
         self._site_key = val
