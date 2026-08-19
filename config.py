@@ -14,6 +14,8 @@ MIRRORS = {
     'jable':   ['jable.tv', 'fs1.app'],
     'supjav':  ['supjav.com', 'supjav.net', 'supjav.org'],
     'hanime1': ['hanime1.me'],
+    'hanimetv': ['hanime.tv'],
+    'tnaflix':  ['www.tnaflix.com'],
 }
 
 
@@ -27,6 +29,10 @@ def site_name_from_url(url: str) -> str:
         return 'SupJav'
     if 'hanime1' in host:
         return 'Hanime1'
+    if 'hanime.tv' in host or 'hanime' in host:
+        return 'HanimeTV'
+    if 'tnaflix' in host:
+        return 'TnaFlix'
     return host or 'Video'
 
 _cf_lock = threading.Lock()
@@ -67,15 +73,29 @@ def queue_csv_path():
 
 
 def _load_prefs():
-    try:
-        with open(_ui_prefs_path(), 'r', encoding='utf-8') as f:
-            raw = json.load(f)
-    except Exception:
-        return {}
-    if isinstance(raw, dict):
-        return dict(raw)
-    if isinstance(raw, str):
-        return {'theme': raw}
+    path = _ui_prefs_path()
+    bak = path + '.bak'
+    for p in (path, bak):
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+        except Exception:
+            continue
+        if isinstance(raw, dict):
+            if p != path:
+                try:
+                    _save_prefs(raw)
+                except Exception:
+                    pass
+            return dict(raw)
+        if isinstance(raw, str):
+            result = {'theme': raw}
+            if p != path:
+                try:
+                    _save_prefs(result)
+                except Exception:
+                    pass
+            return result
     return {}
 
 
@@ -89,6 +109,14 @@ def _save_prefs(prefs):
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
+    try:
+        bak = path + '.bak'
+        with open(bak, 'w', encoding='utf-8') as f:
+            json.dump(prefs, f, ensure_ascii=False, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        pass
 
 
 def get_theme():
@@ -744,6 +772,65 @@ def clear_saved_videos():
             _save_prefs(prefs)
     except Exception:
         pass
+
+
+def export_saved_videos(filepath: str) -> int:
+    """Export saved videos list to a JSON file. Returns number of items exported."""
+    filepath = str(filepath or '').strip()
+    if not filepath:
+        return 0
+    try:
+        saved = get_saved_videos()
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(saved, f, ensure_ascii=False, indent=2, sort_keys=True)
+        return len(saved)
+    except Exception:
+        return 0
+
+
+def import_saved_videos(filepath: str) -> int:
+    """Import saved videos from a JSON file, merging with existing list.
+    Returns the number of NEW items added (duplicates by URL are skipped)."""
+    filepath = str(filepath or '').strip()
+    if not filepath:
+        return 0
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return 0
+    except Exception:
+        return 0
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            saved = prefs.get('saved_videos', [])
+            if not isinstance(saved, list):
+                saved = []
+            existing_urls = {item.get('url') for item in saved if isinstance(item, dict)}
+            added = 0
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                url = (item.get('url') or '').strip()
+                if not url or url in existing_urls:
+                    continue
+                entry = {
+                    'url': url,
+                    'title': item.get('title') or url,
+                    'thumbnail': item.get('thumbnail') or item.get('img') or '',
+                    'duration': item.get('duration') or '',
+                    'site_name': item.get('site_name') or '',
+                }
+                saved.append(entry)
+                existing_urls.add(url)
+                added += 1
+            if added:
+                prefs['saved_videos'] = saved
+                _save_prefs(prefs)
+            return added
+    except Exception:
+        return 0
 
 
 def get_view_history():

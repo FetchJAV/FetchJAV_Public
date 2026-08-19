@@ -9,6 +9,7 @@ from locales import T
 from M3U8Sites.SiteJableTV import JableTVBrowser
 from M3U8Sites.SiteMissAV import MissAVBrowser
 from M3U8Sites.SiteSupJav import SupJavBrowser
+from M3U8Sites.SiteHanimeTV import HanimeTVBrowser
 
 
 def _target(target_id, name, url, **extra):
@@ -184,11 +185,27 @@ SUPJAV_GROUPS = [
     ]),
 ]
 
+HANIMETV_GROUPS = [
+    _group('feeds', 'Feeds', [
+        _target(f'feed:{url.rstrip("/").rsplit("/", 1)[-1]}', name, url)
+        for name, url in HanimeTVBrowser.FEEDS
+    ]),
+    _group('genres', 'Genres', [
+        _target(f'genre:{slug}', name, f'https://hanime.tv/browse/tags/{quote(slug)}')
+        for name, slug in HanimeTVBrowser.TAGS
+    ]),
+    _group('makers', 'Makers', [
+        _target(f'maker:{quote(name.casefold())}', name, f'https://hanime.tv/browse/brands/{quote(name.casefold())}')
+        for name, _ in HanimeTVBrowser.BRANDS
+    ]),
+]
+
 
 SITES = {
     'JableTV': {'browser': JableTVBrowser, 'groups': JABLE_GROUPS},
     'MissAV': {'browser': MissAVBrowser, 'groups': MISSAV_GROUPS},
     'SupJav': {'browser': SupJavBrowser, 'groups': SUPJAV_GROUPS},
+    'HanimeTV': {'browser': HanimeTVBrowser, 'groups': HANIMETV_GROUPS},
 }
 
 

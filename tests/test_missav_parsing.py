@@ -22,15 +22,25 @@ from M3U8Sites.SiteMissAV import SiteMissAV, MissAVBrowser, _unpack_js_eval
 
 
 def test_validate_accepts_video_pages():
-    assert SiteMissAV.validate_url('https://missav.ai/sone-543')
-    assert SiteMissAV.validate_url('https://missav.ai/cn/sone-543-chinese-subtitle')
-    assert SiteMissAV.validate_url('https://missav.ai/dm1151/092014_887')
-    assert SiteMissAV.validate_url('https://missav.ai/dm464/081012-097')
+    assert SiteMissAV.validate_url('https://missav.ai/sone-543') == 'sone-543'
+    assert SiteMissAV.validate_url('https://missav.ai/cn/sone-543-chinese-subtitle') == 'sone-543-chinese-subtitle'
+    assert SiteMissAV.validate_url('https://missav.ai/dm1151/092014_887') == '092014_887'
+    assert SiteMissAV.validate_url('https://missav.ai/dm464/081012-097') == '081012-097'
+    assert SiteMissAV.validate_url('https://missav.ai/dm31/en/lb0029') == 'lb0029'
+    assert SiteMissAV.validate_url('https://missav.ai/en/lb0029') == 'lb0029'
+    assert SiteMissAV.validate_url('https://missav.ai/lb0029') == 'lb0029'
+    assert SiteMissAV.validate_url('https://missav.ws/en/lb0029') == 'lb0029'
+    assert SiteMissAV.validate_url('https://missav123.com/lb0029') == 'lb0029'
+    assert SiteMissAV.validate_url('https://missav.ai/siro1234') == 'siro1234'
+    assert SiteMissAV.validate_url('https://missav.ai/fc2-ppv-1234567') == 'fc2-ppv-1234567'
 
 
 def test_validate_rejects_category_and_foreign_pages():
     assert not SiteMissAV.validate_url('https://missav.ai/dm278/chinese-subtitle')
     assert not SiteMissAV.validate_url('https://missav.ai/dm539/new')
+    assert not SiteMissAV.validate_url('https://missav.ai/genres/drama')
+    assert not SiteMissAV.validate_url('https://missav.ai/search/sone')
+    assert not SiteMissAV.validate_url('https://missav.ai/actresses/Yua%20Mikami')
     assert not SiteMissAV.validate_url('https://jable.tv/videos/x/')
 
 

@@ -42,6 +42,7 @@ datas += copy_metadata('numpy')
 datas += copy_metadata('PyYAML')
 
 datas += [
+    ('..\\M3U8Sites', 'M3U8Sites'),
     ('..\\img', 'img'),
     ('..\\logo.ico', '.'),
     ('..\\logo.png', '.'),

@@ -4,7 +4,7 @@
 from pathlib import Path
 
 
-VERSION = (2, 5, 41, 0)
+VERSION = (0, 1, 1, 0)
 HERE = Path(__file__).resolve().parent
 
 
@@ -25,12 +25,12 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable('040904B0', [
-        StringStruct('CompanyName', 'ALOS (Alos21750)'),
+        StringStruct('CompanyName', 'FetchJAV'),
         StringStruct('FileDescription', '{description}'),
         StringStruct('FileVersion', '{dotted}'),
         StringStruct('InternalName', '{internal_name}'),
         StringStruct('OriginalFilename', '{original_filename}'),
-        StringStruct('ProductName', 'JableTV, MissAV & SupJav Downloader'),
+        StringStruct('ProductName', 'FetchJAV Downloader'),
         StringStruct('ProductVersion', '{dotted}')
       ])
     ]),

@@ -23,7 +23,9 @@ DEFAULT_IGNORE_PATTERNS = {
     "__pycache__", ".venv", ".git", ".pytest_cache", ".vscode",
     "build_tmp", "download", "img", "third_party_licenses",
     "download_queue.csv", "cf_overrides.json", "ui_prefs.json",
-    ".tmp", ".log"
+    "hanimetv_durations.json", "*durations*.json", "*cache*.json",
+    "*history*.json", "catalog_*.json",
+    ".tmp", ".log", ".cache"
 }
 
 
@@ -53,8 +55,10 @@ class FileWatcher:
                     return True
                 if pat.endswith("*") and part.startswith(pat[:-1]):
                     return True
-        filename = os.path.basename(path)
-        if any(filename.endswith(ext) for ext in [".tmp", ".log", ".csv.tmp"]):
+        filename = os.path.basename(path).lower()
+        if any(filename.endswith(ext) for ext in [".tmp", ".log", ".csv.tmp", ".cache"]):
+            return True
+        if 'duration' in filename or 'cache' in filename or 'history' in filename:
             return True
         return False
 

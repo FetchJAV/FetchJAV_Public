@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 import re
+from urllib.parse import urlsplit
 import cloudscraper
 try:
     from curl_cffi import requests as cffi_requests
@@ -42,16 +40,75 @@ def _unpack_js_eval(script_text):
 
 
 class SiteMissAV(M3U8Crawler):
-    """Downloader for missav.ai"""
-    # Matches video pages ONLY (no dm\d+ routing prefix — those are category pages):
-    #   https://missav.ai/cn/sone-543-chinese-subtitle
-    #   https://missav.ai/sone-543
-    #   https://missav.ai/dm1151/092014_887
-    #   https://missav.ai/dm464/081012-097
-    # Does NOT match:
-    #   https://missav.ai/dm278/chinese-subtitle  (category listing)
-    website_pattern = r'https://(?:www\.)?(?:missav\.(?:ai|ws|live)|missav123\.com)/(?:dm\d+/)?(?:cn|en|ja|ko|ms|th)/([a-zA-Z0-9][a-zA-Z0-9\-_]+)|https://(?:www\.)?(?:missav\.(?:ai|ws|live)|missav123\.com)/([a-zA-Z0-9][a-zA-Z0-9\-_]*[-_]\d[a-zA-Z0-9\-_]*)'
-    website_dirname_pattern = r'https://(?:www\.)?(?:missav\.(?:ai|ws|live)|missav123\.com)/(?:dm\d+/)?(?:(?:cn|en|ja|ko|ms|th)/)?([a-zA-Z0-9][a-zA-Z0-9\-_]*[-_]\d[a-zA-Z0-9\-_]*)'
+    """Downloader for missav.ai and its mirrors."""
+
+    _NON_VIDEO_SLUGS = {
+        'chinese-subtitle', 'chinese-subtitles', 'uncensored-leak', 'uncensored',
+        'today-hot', 'weekly-hot', 'monthly-hot', 'new', 'release',
+        'siro', 'luxu', 'gana', 'maan', 'fc2', 'madou', 'tokyohot',
+        '1pondo', 'caribbeancom', 'caribbeancompr', 'heyzo', 'vr',
+        'reducing-mosaic', 'mosaic-removed', 'best', 'ranking', 'top',
+        'schedule', 'download', 'login', 'register', 'user', 'playlist',
+        'history', 'saved', 'about', 'terms', 'privacy', 'contact', 'dmca',
+    }
+    _NON_VIDEO_SECTIONS = {
+        'genres', 'tags', 'actresses', 'makers', 'directors', 'labels',
+        'series', 'search', 'api', 'static', 'css', 'js', 'images', 'img',
+    }
+
+    website_pattern = r'https?://(?:[a-zA-Z0-9-]+\.)?missav(?:123)?\.[a-zA-Z0-9]+/(?:dm\d+/)?(?:(?:cn|en|ja|ko|ms|th|zh|tw|hk|vi|id|de|es|fr)/)?([a-zA-Z0-9][a-zA-Z0-9\-_]*)'
+    website_dirname_pattern = website_pattern
+
+    @classmethod
+    def validate_url(cls, url):
+        if not url:
+            return None
+        url = str(url).strip()
+        try:
+            parsed = urlsplit(url)
+        except Exception:
+            return None
+
+        if parsed.scheme.lower() not in ('http', 'https'):
+            return None
+
+        host = (parsed.hostname or '').lower()
+        if not (re.search(r'(?:^|\.)missav(?:123)?\.[a-z0-9]+$', host) or 'missav' in host):
+            return None
+
+        raw_path = parsed.path.strip('/')
+        if not raw_path:
+            return None
+
+        parts = [p for p in raw_path.split('/') if p]
+        if not parts:
+            return None
+
+        if parts[0].lower() in cls._NON_VIDEO_SECTIONS:
+            return None
+
+        if len(parts) > 1 and re.match(r'^dm\d+$', parts[0], re.I):
+            parts.pop(0)
+
+        if len(parts) > 1 and re.match(r'^(?:cn|en|ja|ko|ms|th|zh|tw|hk|vi|id|de|es|fr|ru|pt|it)$', parts[0], re.I):
+            parts.pop(0)
+
+        if len(parts) != 1:
+            return None
+
+        slug = parts[0]
+        slug_low = slug.lower()
+
+        if slug_low in cls._NON_VIDEO_SLUGS:
+            return None
+
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9\-_]*$', slug):
+            return None
+
+        if not (re.search(r'\d', slug) or '-' in slug or '_' in slug):
+            return None
+
+        return slug
 
     _shared_scraper = None
     _scraper_lock = __import__('threading').Lock()

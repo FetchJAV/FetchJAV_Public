@@ -259,19 +259,15 @@ class Hanime1Browser:
 
     SORTS = (
         '最新上市', '最新上傳', '本日排行', '本週排行', '本月排行',
-        '觀看次數', '讚好比例', '時長最長', '他們在看',
+        '觀看次數', '讚好比例', '時長最長',
     )
     GENRES = (
         '裏番', '泡麵番', 'Motion Anime', '3DCG', '2.5D',
         '2D動畫', 'AI生成', 'MMD', 'Cosplay',
     )
     FEATURE_TAGS = ('中文字幕', '中文配音', '無碼', 'AI解碼', '1080p', '60FPS')
-    CATEGORIES = (
-        [(name, _filter_url(sort=name)) for name in SORTS] +
-        [(name, _filter_url(genre=name)) for name in GENRES] +
-        [(name, _filter_url(**{'tags[]': [name]})) for name in FEATURE_TAGS]
-    )
-    HOMEPAGE_SECTIONS = tuple(CATEGORIES)
+    CATEGORIES = tuple((name, _filter_url(sort=name)) for name in SORTS)
+    HOMEPAGE_SECTIONS = CATEGORIES
 
     @classmethod
     def _get_scraper(cls):
@@ -302,7 +298,7 @@ class Hanime1Browser:
     @classmethod
     def fetch_categories(cls):
         return [{
-            'name': site_i18n.loc(site_i18n.CATEGORY_I18N, url, name),
+            'name': site_i18n.loc(site_i18n.CATEGORY_I18N, name, site_i18n.loc(site_i18n.CATEGORY_I18N, url, name)),
             'url': url,
             'count': 0,
         } for name, url in cls.CATEGORIES]

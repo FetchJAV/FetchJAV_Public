@@ -71,7 +71,7 @@ def resolve_preview_source(
     source = PreviewSource(
         page_url=url,
         title=str(listing.get('title') or ''),
-        thumbnail=str(listing.get('thumbnail') or ''),
+        thumbnail=str(listing.get('thumbnail') or listing.get('img') or listing.get('poster_url') or listing.get('cover_url') or ''),
         duration=str(listing.get('duration') or ''),
         site_name=site_name_from_url(url),
     )
@@ -93,6 +93,7 @@ def resolve_preview_source(
 
         source.title = source.title or str(job.target_name() or '')
         source.thumbnail = source.thumbnail or str(getattr(job, '_imageUrl', '') or '')
+        source.duration = source.duration or str(getattr(job, '_duration', '') or '')
 
         direct_url = str(getattr(job, '_direct_url', '') or '')
         m3u8_url = str(getattr(job, '_m3u8url', '') or '')

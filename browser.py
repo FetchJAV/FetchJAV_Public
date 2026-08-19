@@ -10,9 +10,10 @@ from PIL import ImageTk, Image
 from config import headers
 import config
 from ssl_util import SharedSSLAdapter
-from video_identity import detect_subtitle_langs, SUBTITLE_BADGE_COLORS
+from video_identity import detect_subtitle_langs, detect_video_card_badges, SUBTITLE_BADGE_COLORS
 from M3U8Sites.SiteJableTV import JableTVBrowser
 from M3U8Sites.SiteMissAV import MissAVBrowser
+from M3U8Sites.SiteHanimeTV import HanimeTVBrowser
 
 # ── Design tokens (synced with gui.py) ───────────────────────────────────
 BG        = '#0d0d18'
@@ -95,27 +96,28 @@ class VideoCard(tk.Frame):
         else:
             self._dur_lbl = None
 
-        # Subtitle-language outline badges — bottom-left of thumbnail
+        # Subtitle and Dub outline badges — bottom-left of thumbnail
         sub_badges = []
         try:
-            sub_langs = detect_subtitle_langs(self._data)
+            card_badges = detect_video_card_badges(self._data)
         except Exception:
-            sub_langs = ()
-        if sub_langs:
+            card_badges = []
+        if card_badges:
             _bx = 4
-            for _lang in sub_langs:
-                _color = SUBTITLE_BADGE_COLORS.get(_lang, '#90A4AE')
-                _s_lbl = tk.Label(self._thumb_frame, text=_lang,
+            for b in card_badges:
+                _text = b['text']
+                _color = b['color']
+                _s_lbl = tk.Label(self._thumb_frame, text=_text,
                                   bg='#0a0a18', fg=_color,
                                   highlightthickness=1,
                                   highlightbackground=_color,
                                   highlightcolor=_color,
                                   font=('Consolas', 8, 'bold'),
-                                  padx=3, pady=1)
+                                  padx=4, pady=1)
                 _s_lbl.place(relx=0, rely=1.0, anchor='sw', x=_bx, y=-4)
                 _s_lbl.lift()
                 sub_badges.append(_s_lbl)
-                _bx += 28
+                _bx += max(32, len(_text) * 7 + 10)
 
         # Title
         self._title_lbl = tk.Label(
@@ -176,6 +178,7 @@ class BrowsePanel(tk.Frame):
     SITES = {
         'JableTV':  {'browser': JableTVBrowser},
         'MissAV':   {'browser': MissAVBrowser},
+        'HanimeTV': {'browser': HanimeTVBrowser},
     }
 
     def __init__(self, master, on_add_url=None, on_download_urls=None, **kw):
@@ -603,6 +606,8 @@ class BrowsePanel(tk.Frame):
         from urllib.parse import quote
         if self._site_key == 'JableTV':
             self._current_base_url = f'https://jable.tv/search/?q={quote(q, safe="")}'
+        elif self._site_key == 'HanimeTV':
+            self._current_base_url = HanimeTVBrowser.search_url(q)
         else:
             self._current_base_url = f'https://missav.ai/search/{quote(q, safe="")}'
         self._page = 1
@@ -652,6 +657,8 @@ class BrowsePanel(tk.Frame):
     # ── Page loading ─────────────────────────────────────────────────────
 
     def _build_page_url(self):
+        if hasattr(self._browser(), 'page_url'):
+            return self._browser().page_url(self._current_base_url, self._page)
         if self._site_key == 'JableTV':
             base = self._current_base_url
             if '?' in base:
@@ -712,7 +719,7 @@ class BrowsePanel(tk.Frame):
             self._cards.append(card)
             self._bind_wheel_recursive(card)
 
-            thumb_url = v.get('thumbnail', '')
+            thumb_url = v.get('thumbnail') or v.get('img') or v.get('poster_url') or v.get('cover_url') or ''
             if thumb_url:
                 threading.Thread(target=self._load_thumb,
                                  args=(thumb_url, card, card_w),
@@ -724,8 +731,11 @@ class BrowsePanel(tk.Frame):
 
     def _load_thumb(self, url, card, target_w=300):
         try:
+            req_headers = dict(headers)
+            if 'hanime' in url:
+                req_headers['Referer'] = 'https://hanime.tv/'
             r = _get_thumb_session().get(
-                url, headers=headers, timeout=20, **config.proxy_request_kwargs())
+                url, headers=req_headers, timeout=20, **config.proxy_request_kwargs())
             if r.status_code != 200:
                 return
             img = Image.open(io.BytesIO(r.content))

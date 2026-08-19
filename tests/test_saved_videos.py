@@ -11,11 +11,21 @@ import config
 
 class TestSavedVideos(unittest.TestCase):
     def setUp(self):
-        # Clear saved videos before each test
+        import tempfile
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.orig_env = os.environ.get('APPDATA')
+        os.environ['APPDATA'] = self.tmp_dir.name
         config.clear_saved_videos()
 
     def tearDown(self):
-        config.clear_saved_videos()
+        if self.orig_env is not None:
+            os.environ['APPDATA'] = self.orig_env
+        else:
+            os.environ.pop('APPDATA', None)
+        try:
+            self.tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_saved_videos_crud(self):
         # Test initial state

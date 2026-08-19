@@ -298,6 +298,12 @@ def canonical_code(text: str) -> str:
     if match and re.search(r'[a-z]', match.group(1), re.I):
         prefix = match.group(1).replace('_', '-').casefold()
         return f'{prefix}-{match.group(2)}'
+
+    match = re.search(
+        r'(?<![a-z0-9])([a-z]{2,10})(\d{3,9})(?!\d)',
+        value, re.I)
+    if match:
+        return f'{match.group(1).casefold()}-{match.group(2)}'
     return ''
 
 
@@ -461,6 +467,15 @@ SUBTITLE_BADGE_COLORS = {
     'CH': '#66BB6A',
     'ZH': '#66BB6A',
     'KO': '#AB47BC',
+    'EN SUB': '#42A5F5',
+    'JA SUB': '#EF5350',
+    'CH SUB': '#66BB6A',
+    'KO SUB': '#AB47BC',
+    'CH DUB': '#26A69A',
+    'EN DUB': '#7E57C2',
+    'JA DUB': '#FF7043',
+    'UNCENSORED': '#C2410C',
+    'AI DECODED': '#8B5CF6',
 }
 
 
@@ -489,19 +504,22 @@ def badge_langs_from_label(label: str) -> tuple[str, ...]:
     for token in tokens:
         if ('中文' in token or '繁體' in token or '簡體' in token or '简体' in token or '繁体' in token
                 or '漢語' in token or '汉语' in token or '普通话' in token or '中字' in token
-                or '国语' in token or '國語' in token or '汉化' in token or '漢化' in token):
+                or '国语' in token or '國語' in token or '汉化' in token or '漢化' in token
+                or '中配' in token or '國配' in token or '国配' in token):
             found.add('CH')
             continue
-        if ('日本語' in token or '日语' in token or '日文' in token or '日字' in token or '日語' in token):
+        if ('日本語' in token or '日语' in token or '日文' in token or '日字' in token or '日語' in token
+                or '日配' in token or '日語原聲' in token or '日语原声' in token):
             found.add('JA')
             continue
-        if ('韩文' in token or '韓文' in token or '韩语' in token or '韓國' in token or '韩国' in token):
+        if ('韩文' in token or '韓文' in token or '韩语' in token or '韓國' in token or '韩国' in token or '韓字' in token):
             found.add('KO')
             continue
-        if token in ('en', 'eng', 'english', 'engsub') or 'english' in token or token.endswith('-en'):
+        if ('英語' in token or '英语' in token or '英配' in token or '英字' in token
+                or token in ('en', 'eng', 'english', 'engsub', 'engdub') or 'english' in token or token.endswith('-en')):
             found.add('EN')
             continue
-        if token in ('ja', 'jp', 'jpn', 'japanese', 'jasub') or 'japan' in token or token.endswith('-ja'):
+        if token in ('ja', 'jp', 'jpn', 'japanese', 'jasub', 'jadub') or 'japan' in token or token.endswith('-ja'):
             found.add('JA')
             continue
         if token in ('zh', 'zho', 'chi', 'chinese', 'chs', 'cht', 'cn', 'tw', 'ch') or 'chinese' in token or token.endswith(('-zh', '-cn', '-tw', '-ch')):
@@ -659,3 +677,212 @@ def detect_subtitle_langs(video: dict, dest: str = '',
                 pass
 
     return tuple(l for l in SUBTITLE_BADGE_ORDER if l in found)
+
+
+def detect_dub_langs(video: dict) -> tuple[str, ...]:
+    """Return dubbing language codes ('CH', 'EN', 'JA') if the video has dubbed audio."""
+    if not isinstance(video, dict):
+        return ()
+
+    found = set()
+    title = str(video.get('title') or '')
+    url = str(video.get('url') or '')
+    all_texts = [title, url]
+
+    for f in ('tags', 'categories', 'genres', 'genre', 'tag'):
+        vals = video.get(f)
+        if isinstance(vals, (list, tuple, set)):
+            all_texts.extend(str(x) for x in vals)
+        elif isinstance(vals, str) and vals:
+            all_texts.append(vals)
+
+    combined = ' '.join(all_texts).casefold()
+
+    # Chinese Dub: 中文配音, 国语配音, 國語配音, 中配, 國配, 国配, 粵語配音, 粤语配音, chinese dub, mandarin dub, cantonese dub, cn dub
+    if (re.search(r'(?:中文配音|國語配音|国语配音|中配|國配|国配|粵語配音|粤语配音|chinese\s*dub|mandarin\s*dub|cantonese\s*dub|cn\s*dub|zh-dub)', combined)
+            or '中文配音' in combined or '国语配音' in combined or '國語配音' in combined
+            or 'chinese dub' in combined or 'mandarin dub' in combined):
+        found.add('CH')
+
+    # English Dub: 英語配音, 英语配音, 英文配音, 英配, english dub, eng dub, en dub, english audio
+    if (re.search(r'(?:英語配音|英语配音|英文配音|英配|english\s*dub|eng\s*dub|en\s*dub|english\s*audio)', combined)
+            or '英語配音' in combined or '英语配音' in combined or '英文配音' in combined
+            or 'english dub' in combined or 'eng dub' in combined):
+        found.add('EN')
+
+    # Japanese Dub / Native Audio: 日語配音, 日语配音, 日配, 日語原聲, 日语原声, japanese dub, jap dub, ja dub, jp dub
+    if (re.search(r'(?:日語配音|日语配音|日配|日語原聲|日语原声|japanese\s*dub|jap\s*dub|ja\s*dub|jp\s*dub)', combined)
+            or '日語配音' in combined or '日语配音' in combined
+            or 'japanese dub' in combined):
+        found.add('JA')
+
+    return tuple(l for l in ('CH', 'EN', 'JA') if l in found)
+
+
+def detect_video_card_badges(video: dict, dest: str = '',
+                             cache: object = None,
+                             listing_url: str = '') -> list[dict]:
+    """Return structured badges to render on video preview cards.
+
+    Each badge dictionary contains:
+      - 'text': str (e.g. 'CH DUB', 'CH SUB', 'EN DUB', 'EN SUB', 'JA DUB', 'JA SUB', 'UNCENSORED')
+      - 'color': str (hex color string)
+      - 'kind': str ('dub', 'sub', 'edition')
+      - 'lang': str ('CH', 'EN', 'JA', 'KO', etc.)
+    """
+    if not isinstance(video, dict):
+        return []
+
+    badges = []
+    seen_texts = set()
+
+    # 1. Dubs (Audio Language)
+    dub_langs = detect_dub_langs(video)
+    for d_lang in ('CH', 'EN', 'JA'):
+        if d_lang in dub_langs:
+            txt = f'{d_lang} DUB'
+            if txt not in seen_texts:
+                seen_texts.add(txt)
+                badges.append({
+                    'text': txt,
+                    'color': SUBTITLE_BADGE_COLORS.get(txt, '#26A69A'),
+                    'kind': 'dub',
+                    'lang': d_lang,
+                })
+
+    # 2. Subtitles (Subtitle Language)
+    sub_langs = detect_subtitle_langs(video, dest=dest, cache=cache, listing_url=listing_url)
+    for s_lang in sub_langs:
+        txt = f'{s_lang} SUB'
+        if txt not in seen_texts:
+            seen_texts.add(txt)
+            badges.append({
+                'text': txt,
+                'color': SUBTITLE_BADGE_COLORS.get(txt, SUBTITLE_BADGE_COLORS.get(s_lang, '#66BB6A')),
+                'kind': 'sub',
+                'lang': s_lang,
+            })
+
+    # 3. Edition: Uncensored
+    title = str(video.get('title') or '').casefold()
+    url = str(video.get('url') or '').casefold()
+    tags = str(video.get('tags') or '').casefold()
+    comb = f'{title} {url} {tags}'
+
+    if '無碼' in comb or '无码' in comb or 'uncensored' in comb or 'uncensored-leak' in comb or '無修正' in comb:
+        txt = 'UNCENSORED'
+        if txt not in seen_texts:
+            seen_texts.add(txt)
+            badges.append({
+                'text': txt,
+                'color': SUBTITLE_BADGE_COLORS.get('UNCENSORED', '#C2410C'),
+                'kind': 'edition',
+                'lang': '',
+            })
+
+    return badges
+
+
+def normalize_series_key(s: str) -> str:
+    """Normalize a series title into a canonical key for cross-site/fuzzy matching."""
+    if not s:
+        return ''
+    cleaned = re.sub(r'(?i)\b(the\s+animation|animation|uncensored|re-release|remastered|ova|hd|fhd|4k)\b', '', str(s))
+    return re.sub(r'[^a-zA-Z0-9\u4e00-\u9fff\u3040-\u30ff]', '', cleaned.lower())
+
+
+def extract_series_info(video_or_title) -> tuple[str, int, str]:
+    """
+    Extract (series_base_name, part_number, part_label) from a video dictionary, title, or URL.
+
+    Examples:
+      - 'Stepsis Day 1' -> ('Stepsis', 1, 'Day 1')
+      - 'Stepsis Day 2' -> ('Stepsis', 2, 'Day 2')
+      - 'Momone 1' -> ('Momone', 1, 'Part 1')
+      - 'Ane wa Yanmama Junyuu-chuu 2' -> ('Ane wa Yanmama Junyuu-chuu', 2, 'Part 2')
+      - 'Overflow Season 1 Episode 2' -> ('Overflow', 2, 'Episode 2')
+      - 'Tsumamigui 3 前編' -> ('Tsumamigui 3', 1, '前編')
+    """
+    if isinstance(video_or_title, dict):
+        title = str(video_or_title.get('title') or '').strip()
+        url = str(video_or_title.get('url') or video_or_title.get('page_url') or '').strip()
+    else:
+        title = str(video_or_title or '').strip()
+        url = ''
+
+    candidates_to_try = [title]
+    if url:
+        path_slug = unquote(urlsplit(url).path).strip('/').rsplit('/', 1)[-1]
+        slug_title = path_slug.replace('-', ' ').replace('_', ' ')
+        if slug_title and slug_title.lower() != title.lower():
+            candidates_to_try.append(slug_title)
+
+    for raw_text in candidates_to_try:
+        if not raw_text:
+            continue
+        cleaned = re.sub(r'\[[^\]]*\]|\([^\)]*(?:uncensored|censored|leak|1080p|720p|4k|hd|fhd|chinese|sub|subtitle)[^\)]*\)', '', raw_text, flags=re.I).strip()
+
+        # 1. Check explicit part keywords: Day N, Episode N, Ep N, Part N, Vol N, Lesson N, Chapter N, Act N, #N, 第N話/回
+        m = re.search(r'(?i)(?:^|[\s\-_#])(day|episode|ep\.?|part\.?|pt\.?|vol\.?|volume|lesson|stage|chapter|act|case|file|season\s*\d+\s*episode|season\s*\d+\s*ep|season|s\d+e|#|第)\s*(\d+|[ivxlcdm]+)(?:\s*(?:話|回|部|巻))?', cleaned)
+        if m:
+            kw = m.group(1).strip()
+            num_str = m.group(2).strip()
+            try:
+                num = int(num_str)
+            except ValueError:
+                roman_map = {'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10}
+                num = roman_map.get(num_str.lower(), 1)
+            
+            base = (cleaned[:m.start()] + ' ' + cleaned[m.end():]).strip()
+            base = re.sub(r'[\-_:–—#\s]+$', '', base).strip()
+            base = re.sub(r'^[\-_:–—#\s]+', '', base).strip()
+            if not base and m.start() == 0:
+                base = cleaned[:m.end()].strip()
+
+            label = f'{kw.capitalize()} {num_str}' if not kw.startswith('#') else f'#{num_str}'
+            return base, num, label
+
+        # 2. Check Japanese/Chinese 前編 / 後編 / 上巻 / 下巻 / 完結編
+        jp_map = {
+            '前編': (1, '前編'), '上巻': (1, '上巻'),
+            '中編': (2, '中編'), '中巻': (2, '中巻'),
+            '後編': (3, '後編'), '下巻': (3, '下巻'),
+            '完結編': (4, '完結編'),
+        }
+        for kw, (num, label) in jp_map.items():
+            if kw in cleaned:
+                base = cleaned.replace(kw, '').strip()
+                base = re.sub(r'[\-_:–—#\s]+$', '', base).strip()
+                return base, num, label
+
+        # 3. Check trailing number or Roman numeral: 'Momone 1', 'Title - 02', 'Title 2'
+        m_end = re.search(r'(?i)(?:^|[\s\-_])(\d+|[ivxlcdm]+)$', cleaned)
+        if m_end:
+            num_str = m_end.group(1)
+            try:
+                num = int(num_str)
+            except ValueError:
+                roman_map = {'i': 1, 'ii': 2, 'iii': 3, 'iv': 4, 'v': 5, 'vi': 6, 'vii': 7, 'viii': 8, 'ix': 9, 'x': 10}
+                num = roman_map.get(num_str.lower(), 1)
+            base = cleaned[:m_end.start()].strip()
+            base = re.sub(r'[\-_:–—#\s]+$', '', base).strip()
+            label = f'Part {num_str}'
+            return base, num, label
+
+    return '', 0, ''
+
+
+def is_same_series(video_a, video_b) -> bool:
+    """Return True if video_a and video_b belong to the same series."""
+    base_a, part_a, _ = extract_series_info(video_a)
+    base_b, part_b, _ = extract_series_info(video_b)
+    if not base_a or not base_b:
+        return False
+    norm_a = normalize_series_key(base_a)
+    norm_b = normalize_series_key(base_b)
+    if not norm_a or not norm_b:
+        return False
+    return (norm_a == norm_b or
+            (len(norm_a) >= 4 and len(norm_b) >= 4 and (norm_a in norm_b or norm_b in norm_a)))
+
+

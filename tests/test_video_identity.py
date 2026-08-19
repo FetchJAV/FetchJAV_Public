@@ -12,7 +12,9 @@ from video_identity import (
     badge_langs_from_label,
     canonical_code,
     dedupe_video_candidates,
+    detect_dub_langs,
     detect_subtitle_langs,
+    detect_video_card_badges,
     normalize_source_subtitle_evidence,
     normalize_version_preference,
     site_from_url,
@@ -471,4 +473,98 @@ def test_detect_subtitle_langs_cached_subtitles():
 
     video = {'title': 'SSIS-777 Sample', 'url': 'https://jable.tv/videos/ssis-777/'}
     assert detect_subtitle_langs(video, cache=FakeCache()) == ('JA',)
+
+
+@pytest.mark.parametrize(('video', 'expected_dubs'), [
+    ({'title': 'Sample [中文配音]', 'url': 'https://hanime1.me/watch?v=123'}, ('CH',)),
+    ({'title': 'Sample [國語配音]', 'url': 'https://hanime1.me/watch?v=124'}, ('CH',)),
+    ({'title': 'Sample 【中配】', 'url': 'https://hanime1.me/watch?v=125'}, ('CH',)),
+    ({'title': 'Sample Chinese Dub', 'url': 'https://hanime1.me/watch?v=126'}, ('CH',)),
+    ({'title': 'Sample', 'tags': ['中文配音'], 'url': 'https://hanime1.me/watch?v=127'}, ('CH',)),
+    ({'title': 'Sample [英語配音]', 'url': 'https://hanime1.me/watch?v=128'}, ('EN',)),
+    ({'title': 'Sample English Dub', 'url': 'https://hanime1.me/watch?v=129'}, ('EN',)),
+    ({'title': 'Sample [日語配音]', 'url': 'https://hanime1.me/watch?v=130'}, ('JA',)),
+    ({'title': 'Sample Japanese Dub', 'url': 'https://hanime1.me/watch?v=131'}, ('JA',)),
+    ({'title': 'Regular Video', 'url': 'https://hanime1.me/watch?v=132'}, ()),
+])
+def test_detect_dub_langs(video, expected_dubs):
+    assert detect_dub_langs(video) == expected_dubs
+
+
+def test_detect_video_card_badges():
+    # Chinese Dub video
+    v_cn_dub = {'title': 'Hanime Video [中文配音]', 'url': 'https://hanime1.me/watch?v=101'}
+    badges = detect_video_card_badges(v_cn_dub)
+    badge_texts = [b['text'] for b in badges]
+    assert 'CH DUB' in badge_texts
+
+    # English Dub video
+    v_en_dub = {'title': 'Anime Video [English Dub]', 'url': 'https://hanime1.me/watch?v=102'}
+    badges = detect_video_card_badges(v_en_dub)
+    badge_texts = [b['text'] for b in badges]
+    assert 'EN DUB' in badge_texts
+
+    # Japanese Dub video
+    v_ja_dub = {'title': 'Anime Video [日語配音]', 'url': 'https://hanime1.me/watch?v=103'}
+    badges = detect_video_card_badges(v_ja_dub)
+    badge_texts = [b['text'] for b in badges]
+    assert 'JA DUB' in badge_texts
+
+    # Chinese Sub video
+    v_cn_sub = {'title': 'IPZZ-905 [中文字幕]', 'url': 'https://jable.tv/videos/ipzz-905/'}
+    badges = detect_video_card_badges(v_cn_sub)
+    badge_texts = [b['text'] for b in badges]
+    assert 'CH SUB' in badge_texts
+
+    # English Sub video
+    v_en_sub = {'title': 'STARS-123 [Eng Sub]', 'url': 'https://jable.tv/videos/stars-123/'}
+    badges = detect_video_card_badges(v_en_sub)
+    badge_texts = [b['text'] for b in badges]
+    assert 'EN SUB' in badge_texts
+
+    # Uncensored Chinese Sub video
+    v_uncensored = {'title': 'IPZZ-905 [中文字幕] 無碼流出', 'url': 'https://jable.tv/videos/ipzz-905/'}
+    badges = detect_video_card_badges(v_uncensored)
+    badge_texts = [b['text'] for b in badges]
+    assert 'CH SUB' in badge_texts
+    assert 'UNCENSORED' in badge_texts
+
+
+def test_series_extraction_and_sorting():
+    from video_identity import extract_series_info, is_same_series, normalize_series_key
+
+    # 1. Test Day N
+    b1, n1, l1 = extract_series_info({'title': 'Stepsis Day 1', 'url': 'https://hanime.tv/videos/hentai/stepsis-day-1'})
+    b2, n2, l2 = extract_series_info({'title': 'Stepsis Day 2', 'url': 'https://hanime.tv/videos/hentai/stepsis-day-2'})
+    b3, n3, l3 = extract_series_info({'title': 'step sis day 3', 'url': 'https://hanime.tv/videos/hentai/stepsis-day-3'})
+
+    assert normalize_series_key(b1) == normalize_series_key(b2) == normalize_series_key(b3) == 'stepsis'
+    assert n1 == 1 and n2 == 2 and n3 == 3
+    assert 'Day 1' in l1 and 'Day 2' in l2 and 'Day 3' in l3
+
+    assert is_same_series({'title': 'Stepsis Day 1'}, {'title': 'Stepsis Day 2'})
+    assert is_same_series({'title': 'Stepsis Day 1'}, {'title': 'Step Sis Day 3'})
+
+    # 2. Test Part N / Trailing number
+    m1_b, m1_n, m1_l = extract_series_info('Momone 1')
+    m2_b, m2_n, m2_l = extract_series_info('Momone 2')
+    assert normalize_series_key(m1_b) == normalize_series_key(m2_b) == 'momone'
+    assert m1_n == 1 and m2_n == 2
+
+    # 3. Test Japanese 前編 / 後編
+    t1_b, t1_n, t1_l = extract_series_info('Tsumamigui 3 前編')
+    t2_b, t2_n, t2_l = extract_series_info('Tsumamigui 3 後編')
+    assert t1_n == 1 and t2_n == 3
+    assert is_same_series('Tsumamigui 3 前編', 'Tsumamigui 3 後編')
+
+    # 4. Sorting test
+    raw_list = [
+        {'title': 'Stepsis Day 3', '_series_part': 3},
+        {'title': 'Stepsis Day 1', '_series_part': 1},
+        {'title': 'Stepsis Day 2', '_series_part': 2},
+    ]
+    sorted_list = sorted(raw_list, key=lambda x: x['_series_part'])
+    assert [v['title'] for v in sorted_list] == ['Stepsis Day 1', 'Stepsis Day 2', 'Stepsis Day 3']
+
+
 
