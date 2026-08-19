@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documentation — FetchJAV</title>
+  <meta name="description" content="FetchJAV documentation: overview, installation, system requirements, usage guides, privacy, and licensing." />
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <nav class="nav">
+    <div class="container nav-inner">
+      <a class="logo" href="index.html">
+        <img src="assets/logo_only.png" alt="FetchJAV logo" />
+        <span>FetchJAV</span>
+      </a>
+      <div class="nav-links" id="navLinks">
+        <a href="index.html">Home</a>
+        <a href="download.html">Download</a>
+        <a href="docs.html">Docs</a>
+        <a href="faq.html">FAQ</a>
+        <a href="request.html">Request</a>
+        <a class="btn btn-primary btn-sm nav-cta" href="download.html">Get the app</a>
+      </div>
+      <button class="nav-toggle" aria-label="Toggle menu" aria-expanded="false">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="container">
+      <h1 class="reveal">Documentation</h1>
+      <p class="reveal">A complete guide to installing and using FetchJAV.</p>
+    </div>
+  </header>
+
+  <section class="section" style="padding-top:40px;">
+    <div class="container doc">
+
+      <h2>Overview</h2>
+      <p>FetchJAV is a privacy-first desktop application for Windows that lets you browse supported video sites, download videos in the background, generate subtitles locally, and organize everything in one library.</p>
+      <p>Every feature runs on your machine. Downloading, transcription, metadata, and playback all happen locally — FetchJAV is not a service, it is software you install and own. No account or API key is required.</p>
+      <p>FetchJAV ships with support for JableTV, MissAV, and SupJav. The developers are constantly integrating more supported websites into stable releases, so keep an eye on new updates.</p>
+      <p>FetchJAV is closed-source software. The source code is proprietary and not publicly available. Redistribution or reverse engineering of the application is not permitted without written consent.</p>
+
+      <h2>Getting started</h2>
+      <h3>1. Download the app</h3>
+      <p>Go to the <a href="download.html">Download</a> page and grab the latest Windows executable (<code>.exe</code>). FetchJAV is a portable one-click run app.</p>
+
+      <h3>2. Run the app</h3>
+      <p>For security purposes, FetchJAV is never installed on your device. Just run the <code>.exe</code> and it starts immediately — it does not install anything on your PC and leaves nothing behind once you stop it. Close the app when you are done, and nothing remains.</p>
+
+      <h3>3. Keep the default download folder</h3>
+      <p>We recommend not changing the download directory. The AI system needs the downloaded files in the default location to recognise the audio and generate subtitles correctly. Once you have selected a different folder or relocated the files to another location, the AI system can no longer find the audio, and subtitle generation will not work correctly.</p>
+
+      <h2>System requirements</h2>
+      <h3>Operating system</h3>
+      <p>Windows 10 or 11, 64-bit recommended. Windows 8.1 and older will not give the best performance.</p>
+
+      <h3>Memory &amp; storage</h3>
+      <p>4&nbsp;GB of RAM is recommended. Storage depends on your library — HD video averages 1–2&nbsp;GB per hour, plus subtitle and metadata files, which are small.</p>
+
+      <h3>Optional components</h3>
+      <p><strong>FFmpeg</strong> — enables advanced container handling and additional format support. If FFmpeg is not present, FetchJAV falls back to its built-in handling for common formats.</p>
+      <p><strong>Local Whisper runtime</strong> — enables faster, fully-offline transcription. Without it, subtitle generation is slower or requires a network-backed model depending on your configuration.</p>
+      <p><strong>LLM provider</strong> — an optional API key for higher-quality subtitle translations. Everything else works without one.</p>
+
+      <h2>Usage</h2>
+
+      <h3>Browse &amp; search</h3>
+      <p>Browse supported sources directly inside the app, search videos by keyword, and filter results by category. Cards show previews and metadata at a glance. Select multiple cards, then add them to the download queue or start downloading instantly.</p>
+
+      <h3>Downloads</h3>
+      <p>Downloads run in the background with automatic retries and resumable transfers. Every download keeps persistent state and writes segments to disk as it goes — if you close the app, lose your connection, or your computer restarts, the queue restores and downloads continue from where they stopped. Failed tasks retry automatically.</p>
+      <p>You can limit download speed per video, choose how many worker connections each download uses (1–16), and cap global concurrency at up to 32 simultaneous downloads. Proxy support is included too.</p>
+
+      <h3>Subtitles</h3>
+      <p>After a download finishes, FetchJAV can transcribe the Japanese audio locally and export <code>.ja.srt</code>, <code>.en.srt</code>, and <code>.zh-TW.srt</code> sidecar files. Everything runs in the background with progress indicators. An optional LLM provider can be configured for higher-quality translations if you want it.</p>
+
+      <h3>Batch import</h3>
+      <p>Paste plain text, a URL list, or a CSV file. FetchJAV parses the input, validates entries, removes duplicates, resolves metadata, and adds valid items to the queue. Invalid entries are reported without crashing the app. Once a download finishes, the file is saved directly into your Downloads folder.</p>
+
+      <h3>Queue control</h3>
+      <p>Pause, resume, cancel, retry, and reorder tasks from the queue. Each video shows its own speed, progress, and status, and a persistent history keeps a record of past downloads across restarts.</p>
+
+      <h3>Play &amp; organize</h3>
+      <p>Preview videos in the built-in player with subtitle selection and resume playback. FetchJAV reads and writes metadata to keep your library tidy automatically, so files stay organized without manual cleanup.</p>
+
+      <h2>Data &amp; privacy</h2>
+      <p>Your library, queue, and history live in your user profile. Downloading, transcription, and metadata processing all run on your machine — nothing is stored on a FetchJAV server, and no account is required to use the app. FetchJAV has no telemetry and no analytics.</p>
+      <p>Optional features (such as an LLM provider for translations) only send the specific content you choose to translate, and only when you enable them. The only optional network features are update checks and an LLM endpoint you explicitly configure yourself. By default, FetchJAV is fully offline.</p>
+
+      <h2>Updates</h2>
+      <p>FetchJAV checks for updates on launch and notifies you when a new version is available. Or you can check for updates manually by going to <strong>Settings → Update</strong> section.</p>
+
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-links-row">
+        <div class="footer-links">
+          <a href="docs.html">Documentation</a>
+          <a href="download.html">Download</a>
+          <a href="faq.html">FAQ</a>
+          <a href="request.html">Request</a>
+          <a class="tg-icon" href="https://t.me/FetchJAV" aria-label="Join Telegram">
+            Join Telegram
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+          </a>
+        </div>
+        <span class="copyright">© <span data-year>2026</span> FetchJAV. All rights reserved.</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
