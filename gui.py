@@ -489,6 +489,8 @@ class MainWindow(tk.Tk):
         _root_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
         _img_dir = os.path.join(_root_dir, 'img')
         _ico_candidates = [
+            os.path.join(_img_dir, 'logo21', 'logo21_multi.ico'),
+            os.path.join(_img_dir, 'logo21', 'logo21_256x256.ico'),
             os.path.join(_root_dir, 'logo.ico'),
             os.path.join(_img_dir, 'favicon.ico'),
         ]

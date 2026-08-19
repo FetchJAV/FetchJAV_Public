@@ -653,8 +653,11 @@ def test_autohide_scrollbar_on_scroll_tree_view():
 def test_software_icons_exist_in_img():
     root = Path(__file__).resolve().parents[1]
     img_dir = root / 'img'
+    assert (root / 'logo.ico').exists()
+    assert (root / 'logo.png').exists()
     assert (img_dir / 'favicon.ico').exists()
     assert (img_dir / 'favicon-256x256.png').exists()
+    assert (img_dir / 'logo21' / 'logo21_multi.ico').exists()
 
 
 def test_preview_mode_toggles_tag_sidebar_visibility():

@@ -1682,6 +1682,8 @@ class SmallToolApp(ctk.CTk):
         _app_dir = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys, 'frozen', False) else __file__))
         _img_dir = os.path.join(_root_dir, 'img')
         _ico_candidates = [
+            os.path.join(_img_dir, 'logo21', 'logo21_multi.ico'),
+            os.path.join(_img_dir, 'logo21', 'logo21_256x256.ico'),
             os.path.join(_root_dir, 'logo.ico'),
             os.path.join(_app_dir, 'logo.ico'),
             os.path.join(_img_dir, 'favicon.ico'),

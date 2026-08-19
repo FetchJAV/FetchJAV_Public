@@ -317,13 +317,19 @@ def main():
     render_svg(browse_d, stroke_color=(60, 60, 70, 255), stroke_width=1.8, target_size=48).save(os.path.join(img_dir, 'icon_sub_local_light.png'))
 
     # 2. Multi-resolution ICO and logo variants generated from master FetchJAV logo
+    logo21_multi_p = os.path.join(img_dir, 'logo21', 'logo21_multi.ico')
     master_logo_p = os.path.join(img_dir, 'logo.png')
-    if os.path.isfile(master_logo_p):
-        master_img = Image.open(master_logo_p).convert('RGBA')
-        
-        # Save root and img multi-resolution ico files (16..256)
+
+    if os.path.isfile(logo21_multi_p):
+        import shutil
+        shutil.copyfile(logo21_multi_p, os.path.join(root_dir, 'logo.ico'))
+        shutil.copyfile(logo21_multi_p, os.path.join(img_dir, 'favicon.ico'))
+    elif os.path.isfile(master_logo_p):
         generate_multi_resolution_ico(master_logo_p, os.path.join(root_dir, 'logo.ico'))
         generate_multi_resolution_ico(master_logo_p, os.path.join(img_dir, 'favicon.ico'))
+
+    if os.path.isfile(master_logo_p):
+        master_img = Image.open(master_logo_p).convert('RGBA')
 
         # Save root logo.png (256x256)
         master_img.resize((256, 256), Image.LANCZOS).save(os.path.join(root_dir, 'logo.png'))
