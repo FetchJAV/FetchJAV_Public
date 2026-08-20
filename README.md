@@ -42,13 +42,12 @@
 - Technology Stack
 - Project Structure
 - Testing
-- Building from Source
 - Troubleshooting
 - Contributing
 - License
 - Disclaimer
 - Acknowledgments
-- 繁體中文 (Traditional Chinese)
+
 
 ---
 
