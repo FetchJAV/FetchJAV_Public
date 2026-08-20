@@ -83,7 +83,7 @@ def _analytics_worker():
     """Background daemon worker that drains the event queue and dispatches HTTP hits."""
     session = requests.Session()
     session.headers.update({
-        'User-Agent': f'FetchJAV-Desktop/0.1.3 ({platform.system()} {platform.release()})',
+        'User-Agent': f'FetchJAV-Desktop/0.1.4 ({platform.system()} {platform.release()})',
     })
 
     while True:
@@ -158,7 +158,7 @@ def track_event(event_name: str, params: Optional[Dict[str, Any]] = None) -> Non
         pass
 
 
-def track_app_open(version: str = '0.1.3', lang: str = 'en') -> None:
+def track_app_open(version: str = '0.1.4', lang: str = 'en') -> None:
     """Report application launch event."""
     track_event('app_open', {
         'app_name': 'FetchJAV',

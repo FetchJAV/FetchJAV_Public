@@ -254,7 +254,7 @@ jobs:
       - name: Verify executable metadata
         shell: pwsh
         run: |
-          $expected = "0.1.3.0"
+          $expected = "0.1.4.0"
           $files = @(
             "dist\JableTV_Modern.exe",
             "dist\Jable_smalltool.exe",

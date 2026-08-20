@@ -42,6 +42,15 @@ _CATALOG_TTL = 3600  # 1 hour cache
 
 
 def _get_node_path():
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        for cand in [
+            os.path.join(exe_dir, 'node.exe'),
+            os.path.join(exe_dir, 'bin', 'node.exe'),
+            os.path.join(getattr(sys, '_MEIPASS', ''), 'node.exe')
+        ]:
+            if os.path.exists(cand):
+                return cand
     node = shutil.which('node')
     if node:
         return node
@@ -97,6 +106,18 @@ def _load_catalog():
     return []
 
 
+def _no_window_kwargs():
+    """Build kwargs to completely suppress console window popups on Windows."""
+    kwargs = {}
+    if os.name == 'nt':
+        kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        kwargs['startupinfo'] = si
+    return kwargs
+
+
 def _extract_video_manifest(slug):
     """Execute Node extractor to perform handshake and get stream m3u8 URLs with automatic retries."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -112,6 +133,7 @@ def _extract_video_manifest(slug):
                 text=True,
                 cwd=script_dir,
                 timeout=25,
+                **_no_window_kwargs(),
             )
             if proc.returncode == 0:
                 data = json.loads(proc.stdout)
