@@ -6010,7 +6010,8 @@ class ModernApp(ctk.CTk):
 
         # Right Sidebar Pane (Related Videos) - packed FIRST with width=340
         right_sidebar = ctk.CTkFrame(split, width=340, fg_color='transparent')
-        right_sidebar.pack(side='right', fill='y', anchor='ne', padx=(0, 24))
+        right_sidebar.pack_propagate(False)
+        right_sidebar.pack(side='right', fill='y', padx=(0, 24))
 
         # Left Main Pane (Video Player + Info + Bottom Category Cards) - packed SECOND with expand=True
         left_main = ctk.CTkFrame(split, fg_color='transparent')
@@ -6795,11 +6796,13 @@ class ModernApp(ctk.CTk):
         msg_frame.pack(fill='x', padx=20, pady=(0, 14))
 
         announcement_text = (
-            "This is the world's biggest video compilation directory with around 2,200,000+ (2.2 Million+) videos and growing.\n\n"
-            "This is absolutely free and will remain free as well. I hope you guys enjoy it. "
-            "If you want any feature added or you are facing any issue then leave your request to us either on our website or our telegram group https://t.me/FetchJAV .\n\n"
-            "In future we will also be bringing more new projects so keep an eye on them too.\n\n"
-            "With love,\nFetchJAV team."
+            "Dear friends & fellow cinephiles,\n\n"
+            "Building FetchJAV has been a true labor of love. What started as a small personal project has blossomed into the world's most extensive, unified video compilation directory — bringing together over 2,200,000+ (2.2 Million+) videos across your favorite sources, with fresh discoveries added every single day.\n\n"
+            "We built this for you. FetchJAV is completely free, open, and will always stay 100% free with no paywalls, subscriptions, or compromises. We pour our hearts into refining every pixel, player optimization, and translation feature to give you the smoothest, most enjoyable experience possible.\n\n"
+            "Your voice truly shapes this application. Whether you have an idea for a new feature, discovered an issue, or simply want to say hello, we are always here listening. Come chat with us, share your thoughts, and be a part of our warm community on Telegram (https://t.me/FetchJAV) or GitHub.\n\n"
+            "We have so many exciting new projects and innovations in the pipeline — thank you from the bottom of our hearts for being on this journey with us.\n\n"
+            "With all our love and gratitude,\n"
+            "— The FetchJAV Team ❤️"
         )
 
         ctk.CTkLabel(
@@ -9141,7 +9144,8 @@ class ModernApp(ctk.CTk):
             bottom_container.pack_forget()
             left_main.pack_forget()
             right_sidebar.pack_forget()
-            right_sidebar.pack(side='right', fill='y', anchor='ne', padx=(0, 24))
+            right_sidebar.configure(width=340)
+            right_sidebar.pack(side='right', fill='y', padx=(0, 24))
             left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
             hdr_frame = ctk.CTkFrame(right_sidebar, fg_color='transparent')
