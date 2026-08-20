@@ -12,7 +12,7 @@ import requests
 import config
 
 
-REPO = "DeepanshuK2002/FetchJAV"
+REPO = "FetchJAV/FetchJAV_Public"
 API_LATEST = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 
