@@ -9639,6 +9639,7 @@ class ModernApp(ctk.CTk):
         self._exit_search_all_view()
         self._hide_page_heading()
         self._categories.clear()
+        self._cached_sidebar_cats = None
         self._selected_urls.clear()
         self._selected_source_subtitle_evidence.clear()
         self._update_selection_count()
@@ -10094,26 +10095,57 @@ class ModernApp(ctk.CTk):
             tags_by_group = {}
             for nav_label, nav_items in MISS_AV_HEADER_NAV:
                 tags_by_group[nav_label] = [(name, url, '') for name, url in nav_items]
-            lang = T('missav_lang')
-            try:
-                cats = SITES[self._site_key]['browser'].fetch_categories(lang=lang)
-            except Exception:
-                cats = []
-            tags_by_group[T('sidebar_categories')] = [(c['name'], c['url'], '') for c in cats]
+            cached = getattr(self, '_cached_sidebar_cats', None)
+            if cached is not None:
+                tags_by_group[T('sidebar_categories')] = [(c['name'], c['url'], '') for c in cached]
+            else:
+                tags_by_group[T('sidebar_categories')] = []
+                _site_key_for_bg = self._site_key
+                _lang_for_bg = T('missav_lang')
+                _my_gen = self._build_gen
+                def _fetch_sidebar_cats_bg(_sk=_site_key_for_bg, _lang=_lang_for_bg):
+                    try:
+                        cats = SITES[_sk]['browser'].fetch_categories(lang=_lang)
+                    except Exception:
+                        cats = []
+                    def _apply():
+                        if self._is_closing or _my_gen != self._build_gen:
+                            return
+                        self._cached_sidebar_cats = cats
+                        self._rebuild_sidebar()
+                    self._ui(_apply, gen=_my_gen)
+                threading.Thread(target=_fetch_sidebar_cats_bg, daemon=True).start()
         else:
             tags_by_group = {}
-            lang = T('supjav_lang')
-            try:
-                cats = SITES[self._site_key]['browser'].fetch_categories(lang=lang)
-            except TypeError:
-                try:
-                    cats = SITES[self._site_key]['browser'].fetch_categories()
-                except Exception:
-                    cats = []
-            except Exception:
-                cats = []
-            tags_by_group[T('sidebar_categories')] = [(c['name'], c['url'], '') for c in cats]
+            cached = getattr(self, '_cached_sidebar_cats', None)
+            if cached is not None:
+                tags_by_group[T('sidebar_categories')] = [(c['name'], c['url'], '') for c in cached]
+            else:
+                tags_by_group[T('sidebar_categories')] = []
+                _site_key_for_bg = self._site_key
+                _lang_for_bg = T('supjav_lang')
+                _my_gen = self._build_gen
+                def _fetch_sidebar_cats_bg(_sk=_site_key_for_bg, _lang=_lang_for_bg):
+                    try:
+                        cats = SITES[_sk]['browser'].fetch_categories(lang=_lang)
+                    except TypeError:
+                        try:
+                            cats = SITES[_sk]['browser'].fetch_categories()
+                        except Exception:
+                            cats = []
+                    except Exception:
+                        cats = []
+                    def _apply():
+                        if self._is_closing or _my_gen != self._build_gen:
+                            return
+                        self._cached_sidebar_cats = cats
+                        self._rebuild_sidebar()
+                    self._ui(_apply, gen=_my_gen)
+                threading.Thread(target=_fetch_sidebar_cats_bg, daemon=True).start()
 
+        self._rebuild_sidebar_tags(tags_by_group)
+
+    def _rebuild_sidebar_tags(self, tags_by_group):
         lookup_tag_groups = self._site_key == 'JableTV'
         for group_name, tag_list in tags_by_group.items():
             if not tag_list:
