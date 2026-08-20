@@ -6008,10 +6008,9 @@ class ModernApp(ctk.CTk):
         split = ctk.CTkFrame(main_scroll, fg_color='transparent')
         split.pack(fill='both', expand=True)
 
-        # Right Sidebar Pane (Related Videos) - packed FIRST with pack_propagate(False) so it never shrinks
+        # Right Sidebar Pane (Related Videos) - packed FIRST with width=340
         right_sidebar = ctk.CTkFrame(split, width=340, fg_color='transparent')
         right_sidebar.pack(side='right', fill='y', anchor='ne', padx=(0, 24))
-        right_sidebar.pack_propagate(False)
 
         # Left Main Pane (Video Player + Info + Bottom Category Cards) - packed SECOND with expand=True
         left_main = ctk.CTkFrame(split, fg_color='transparent')
@@ -6439,8 +6438,32 @@ class ModernApp(ctk.CTk):
         for v in config.get_view_history():
             _add_cand(v)
 
-        # Fallback series search if candidate pool is small (< 6 items)
-        if len(all_candidates) < 6:
+        # HanimeTV instant in-memory catalog candidate backfill
+        if (selected_site == 'HanimeTV' or 'hanime.tv' in current_url.lower()) and len(all_candidates) < 25:
+            try:
+                from M3U8Sites.SiteHanimeTV import _load_catalog, _load_duration_cache
+                cat = _load_catalog()
+                dur_cache = _load_duration_cache()
+                for item in cat:
+                    slug = str(item.get('slug') or '')
+                    cand_url = f'https://hanime.tv/videos/hentai/{slug}'
+                    _add_cand({
+                        'title': item.get('name') or slug,
+                        'url': cand_url,
+                        'thumbnail': item.get('poster_url') or item.get('cover_url') or '',
+                        'img': item.get('poster_url') or item.get('cover_url') or '',
+                        'duration': dur_cache.get(slug) or '',
+                        'site_name': 'HanimeTV',
+                        'cover_url': item.get('poster_url') or item.get('cover_url') or '',
+                        'tags': item.get('tags') or item.get('genres') or [],
+                    })
+                    if len(all_candidates) >= 30:
+                        break
+            except Exception:
+                pass
+
+        # Fallback series search if candidate pool is small (< 16 items)
+        if len(all_candidates) < 16:
             import re
             code_m = re.search(r'([a-zA-Z]{2,6})[\-_ ]*\d{3,5}', title_text or url, re.IGNORECASE)
             search_term = code_m.group(1).upper() if code_m else ''
@@ -6456,6 +6479,25 @@ class ModernApp(ctk.CTk):
                                     _add_cand(ev)
                 except Exception:
                     pass
+
+        # If still < 16, search using tags from the preview video
+        if len(all_candidates) < 16:
+            v_tags = (self._preview_video or {}).get('tags') or []
+            tag_terms = [t for t in v_tags if isinstance(t, str) and len(t) >= 2]
+            target_sites = list(SITES.keys()) if is_search_all else [selected_site or getattr(self, '_site_key', 'MissAV')]
+            for term in tag_terms[:2]:
+                for s_k in target_sites:
+                    try:
+                        browser_cls = SITES.get(s_k, {}).get('browser')
+                        if browser_cls and hasattr(browser_cls, 'search'):
+                            extra_vids = browser_cls.search(term)
+                            if isinstance(extra_vids, list):
+                                for ev in extra_vids:
+                                    _add_cand(ev)
+                    except Exception:
+                        pass
+                if len(all_candidates) >= 20:
+                    break
 
         # Dynamic rotation per preview session so every session shows fresh related videos
         shift = (getattr(self, '_preview_gen', 0) * 3) % max(len(all_candidates), 1)
@@ -6522,9 +6564,15 @@ class ModernApp(ctk.CTk):
         bottom_related.pack(fill='x', pady=(8, 16))
 
         related_candidates = [v for v in rotated_pool if v['url'] not in used_category_urls]
-        related_vids = related_candidates[:10]
+        related_vids = list(related_candidates[:10])
+        if len(related_vids) < 10:
+            for v in rotated_pool:
+                if v not in related_vids and v.get('url') != current_url:
+                    related_vids.append(v)
+                    if len(related_vids) >= 10:
+                        break
         if not related_vids:
-            related_vids = rotated_pool[:10]
+            related_vids = list(rotated_pool[:10])
 
         self._preview_left_main = left_main
         self._preview_right_sidebar = right_sidebar
@@ -6706,7 +6754,7 @@ class ModernApp(ctk.CTk):
         ctk.CTkFrame(upd, height=1, fg_color=BORDER).pack(fill='x', padx=20)
 
         row_info = ctk.CTkFrame(upd, fg_color='transparent')
-        row_info.pack(fill='x', padx=20, pady=(14, 16))
+        row_info.pack(fill='x', padx=20, pady=(12, 10))
 
         row_actions = ctk.CTkFrame(row_info, fg_color='transparent')
         row_actions.pack(side='right', anchor='e')
@@ -6741,10 +6789,10 @@ class ModernApp(ctk.CTk):
         self._refresh_update_ui()
 
         # ── Community Announcement & Directory Compilation Note ──────────
-        ctk.CTkFrame(upd, height=1, fg_color=BORDER).pack(fill='x', padx=20, pady=(4, 14))
+        ctk.CTkFrame(upd, height=1, fg_color=BORDER).pack(fill='x', padx=20, pady=(4, 10))
 
         msg_frame = ctk.CTkFrame(upd, fg_color=BG_SIDEBAR, corner_radius=6, border_width=1, border_color=BORDER_CARD)
-        msg_frame.pack(fill='x', padx=20, pady=(0, 18))
+        msg_frame.pack(fill='x', padx=20, pady=(0, 14))
 
         announcement_text = (
             "This is the world's biggest video compilation directory with around 2,200,000+ (2.2 Million+) videos and growing.\n\n"
@@ -6761,12 +6809,18 @@ class ModernApp(ctk.CTk):
             font=(ui_font(), 11),
             justify='left',
             wraplength=600
-        ).pack(anchor='w', padx=16, pady=(14, 10))
+        ).pack(anchor='w', padx=14, pady=(10, 6))
 
         import webbrowser
         def _open_telegram():
             try:
                 webbrowser.open('https://t.me/FetchJAV')
+            except Exception:
+                pass
+
+        def _open_github():
+            try:
+                webbrowser.open('https://github.com/FetchJAV/FetchJAV_Public')
             except Exception:
                 pass
 
@@ -6779,8 +6833,11 @@ class ModernApp(ctk.CTk):
         except Exception:
             pass
 
+        btn_row = ctk.CTkFrame(msg_frame, fg_color='transparent')
+        btn_row.pack(anchor='w', padx=14, pady=(0, 10))
+
         tg_btn = ctk.CTkButton(
-            msg_frame,
+            btn_row,
             text='  Join Telegram Community',
             image=tg_icon_img,
             compound='left',
@@ -6789,12 +6846,28 @@ class ModernApp(ctk.CTk):
             border_color='#2AABEE',
             hover_color=('#e8f4fc', '#172738'),
             text_color='#2AABEE',
-            height=32,
+            height=30,
             corner_radius=CONTROL_RADIUS,
-            font=(ui_font(), 11, 'bold'),
+            font=(ui_font(), 10, 'bold'),
             command=_open_telegram
         )
-        tg_btn.pack(anchor='w', padx=16, pady=(0, 14))
+        tg_btn.pack(side='left', padx=(0, 8))
+
+        gh_btn = ctk.CTkButton(
+            btn_row,
+            text='  GitHub Repository',
+            compound='left',
+            fg_color='transparent',
+            border_width=1,
+            border_color='#8b949e',
+            hover_color=('#f0f0f0', '#1c2128'),
+            text_color='#8b949e',
+            height=30,
+            corner_radius=CONTROL_RADIUS,
+            font=(ui_font(), 10, 'bold'),
+            command=_open_github
+        )
+        gh_btn.pack(side='left')
 
     # ── Settings Tab ─────────────────────────────────────────────────
         # ── Settings Tab (Group 75 2-Column Sidebar Layout) ──────────────
@@ -8999,6 +9072,13 @@ class ModernApp(ctk.CTk):
             shown.clear()
             new_selection = random.sample(pool, min(10, len(pool)))
 
+        if len(new_selection) < 10:
+            for v in pool:
+                if v not in new_selection and v.get('url') != cur_url:
+                    new_selection.append(v)
+                    if len(new_selection) >= 10:
+                        break
+
         for v in new_selection:
             shown.add(v.get('url'))
         self._preview_shown_related_urls = shown
@@ -9062,7 +9142,6 @@ class ModernApp(ctk.CTk):
             left_main.pack_forget()
             right_sidebar.pack_forget()
             right_sidebar.pack(side='right', fill='y', anchor='ne', padx=(0, 24))
-            right_sidebar.pack_propagate(False)
             left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
             hdr_frame = ctk.CTkFrame(right_sidebar, fg_color='transparent')
