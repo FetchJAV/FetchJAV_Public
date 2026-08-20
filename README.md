@@ -101,7 +101,7 @@ FetchJAV is a feature-rich Python desktop application for downloading, streaming
 Browse, search, and filter videos across **JableTV**, **MissAV**, and **SupJav** in a single unified interface. Features responsive high-resolution cover cards, actress links, studio details, and multi-selection for bulk downloads.
 
 <p align="center">
-  <img src="./img/screenshots/02_browse_gallery.png" width="100%" alt="Multi-Site Browse & Discovery Gallery" />
+  <img src="./screenshots/02_browse_gallery.png" width="100%" alt="Multi-Site Browse & Discovery Gallery" />
 </p>
 
 ### 2. Real-Time Streaming Video Preview & CC Subtitle Player
