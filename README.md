@@ -109,11 +109,11 @@ Browse, search, and filter videos across **JableTV**, **MissAV**, and **SupJav**
 Watch full streams directly inside FetchJAV before downloading. Built-in local HTTP streaming proxy automatically handles HTTP range requests, repairs segmented TS/MP4 chunks, and strips anti-scraping fake headers on the fly. Includes an integrated **Closed Caption (CC)** menu with online subtitle search across multiple providers, local `.srt`/`.vtt` loading, audio speech sync, and highlighted track switching.
 
 <p align="center">
-  <img src="./img/screenshots/01_streaming_preview.png" width="100%" alt="Real-Time Streaming Video Preview" />
+  <img src="./screenshots/01_streaming_preview.png" width="100%" alt="Real-Time Streaming Video Preview" />
 </p>
 
 <p align="center">
-  <img src="./img/screenshots/06_video_player_controls.png" width="100%" alt="Video Player Controls" />
+  <img src="./screenshots/06_video_player_controls.png" width="100%" alt="Video Player Controls" />
 </p>
 
 ### 3. High-Performance Multi-Threaded Download Manager
@@ -121,7 +121,7 @@ Watch full streams directly inside FetchJAV before downloading. Built-in local H
 Download multiple videos simultaneously with individual segment worker threads (1–16 workers per video), real-time bandwidth meters, segment progress trackers, and individual retry for interrupted chunks.
 
 <p align="center">
-  <img src="./img/screenshots/05_download_queue.png" width="100%" alt="High-Performance Download Queue" />
+  <img src="./screenshots/05_download_queue.png" width="100%" alt="High-Performance Download Queue" />
 </p>
 
 ### 4. Built-in Local & Cloud AI Subtitle Pipeline
@@ -132,11 +132,11 @@ Automatically extract Japanese audio and generate `.ja.srt`, `.en.srt`, and `.zh
 - **AI Translation Options**: Optional integration with OpenAI, Claude, DeepSeek, Ollama, and Gemini API endpoints for precision subtitle translation.
 
 <p align="center">
-  <img src="./img/screenshots/04_ai_subtitles_config.png" width="100%" alt="AI Subtitle Configuration" />
+  <img src="./screenshots/04_ai_subtitles_config.png" width="100%" alt="AI Subtitle Configuration" />
 </p>
 
 <p align="center">
-  <img src="./img/screenshots/09_translation_models.png" width="100%" alt="Translation Model Settings" />
+  <img src="./screenshots/09_translation_models.png" width="100%" alt="Translation Model Settings" />
 </p>
 
 ### 5. Persistent Download History & Metadata Inspector
@@ -144,7 +144,7 @@ Automatically extract Japanese audio and generate `.ja.srt`, `.en.srt`, and `.zh
 Never lose track of your library. All completed downloads and metadata (actresses, tags, release dates, video codes) are preserved across app restarts with 1-click folder opening and instant re-downloading.
 
 <p align="center">
-  <img src="./img/screenshots/03_download_history.png" width="100%" alt="Persistent Download History" />
+  <img src="./screenshots/03_download_history.png" width="100%" alt="Persistent Download History" />
 </p>
 
 ### 6. Modern Dark UI & Accent Color Customization
@@ -152,7 +152,7 @@ Never lose track of your library. All completed downloads and metadata (actresse
 Designed with a sleek CustomTkinter interface supporting high-DPI scaling, dark/light themes, and selectable accent color themes (Pink, Blue, Violet, Amber, Green).
 
 <p align="center">
-  <img src="./img/screenshots/08_theme_customization.png" width="100%" alt="Theme & Accent Customization" />
+  <img src="./screenshots/08_theme_customization.png" width="100%" alt="Theme & Accent Customization" />
 </p>
 
 ### 7. Advanced Network & Proxy Architecture
@@ -160,7 +160,7 @@ Designed with a sleek CustomTkinter interface supporting high-DPI scaling, dark/
 Full support for custom HTTP, HTTPS, SOCKS4, and SOCKS5 proxies, plus automatic synchronization with Windows manual proxy server settings. Built with `curl_cffi` and a shared SSLContext to eliminate native OpenSSL crash issues.
 
 <p align="center">
-  <img src="./img/screenshots/10_network_proxy_config.png" width="100%" alt="Network & Proxy Configuration" />
+  <img src="./screenshots/10_network_proxy_config.png" width="100%" alt="Network & Proxy Configuration" />
 </p>
 
 ### 8. System Tray Minimization & Background Operation
@@ -168,7 +168,7 @@ Full support for custom HTTP, HTTPS, SOCKS4, and SOCKS5 proxies, plus automatic 
 Minimize FetchJAV to the Windows system tray via `pystray` to allow uninterrupted background batch downloading, complete with status notifications.
 
 <p align="center">
-  <img src="./img/screenshots/11_tray_behavior_settings.png" width="100%" alt="System Tray Settings" />
+  <img src="./screenshots/11_tray_behavior_settings.png" width="100%" alt="System Tray Settings" />
 </p>
 
 ### 9. Comprehensive General Settings
@@ -176,7 +176,7 @@ Minimize FetchJAV to the Windows system tray via `pystray` to allow uninterrupte
 Configure destination folders, default resolution preferences (Highest, 1080p, 720p, 480p, Lowest), multi-language UI selection (English, Traditional Chinese, Simplified Chinese, Japanese), and auto-update checks.
 
 <p align="center">
-  <img src="./img/screenshots/07_general_settings.png" width="100%" alt="General Application Settings" />
+  <img src="./screenshots/07_general_settings.png" width="100%" alt="General Application Settings" />
 </p>
 
 ---
