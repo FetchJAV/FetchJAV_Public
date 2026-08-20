@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urljoin, urlsplit, urlunsplit
