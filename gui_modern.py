@@ -183,7 +183,7 @@ from ui_theme import (
 )
 import analytics
 
-APP_VERSION = '0.1.1'
+APP_VERSION = '0.1.2'
 
 # issue #24: startup breadcrumbs — no-op if crashlog unavailable
 try:
@@ -1187,11 +1187,15 @@ def _thumbnail_request_context(url: str, site_key: str = ''):
     except (TypeError, ValueError):
         return request_headers, cookies
 
-    if 'hanime' in host or 'hanime-cdn' in host or str(site_key or '').lower() in ('hanimetv', 'hanime1'):
+    if 'hanime.tv' in host or 'hanime-cdn' in host:
         request_headers['Referer'] = 'https://hanime.tv/'
         return request_headers, cookies
 
-    if 'tnaflix' in host or str(site_key or '').lower() == 'tnaflix':
+    if 'hanime1' in host:
+        request_headers['Referer'] = 'https://hanime1.me/'
+        return request_headers, cookies
+
+    if 'tnaflix' in host:
         request_headers['Referer'] = 'https://www.tnaflix.com/'
         return request_headers, cookies
 
@@ -1641,7 +1645,9 @@ class ModernApp(ctk.CTk):
         self._rebuilding = False
 
         # Browse state
-        self._site_key = 'JableTV'
+        self._inactive_sites = set(config.get_inactive_sites())
+        _active_sites_init = [k for k in SITES.keys() if k not in self._inactive_sites]
+        self._site_key = _active_sites_init[0] if _active_sites_init else 'JableTV'
         self._categories: list[dict] = []
         self._current_base_url = ''
         self._page = 1
@@ -1665,6 +1671,7 @@ class ModernApp(ctk.CTk):
         self._compass_lbl = None
         self._compass_icon = None
         self._compass_icon_active = None
+        self._last_estimated_cw: int = 260
         self._card_widgets: dict = {}  # url -> {card, sel_btn, preview_btn}
         self._preview_gen: int = 0
         self._preview_video: Optional[dict] = None
@@ -1677,8 +1684,8 @@ class ModernApp(ctk.CTk):
         self._dl_footer_lbl = None
         self._dl_drain_id = None
         self._dl_gen = 0
-        self._thumb_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        self._dur_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self._thumb_executor = concurrent.futures.ThreadPoolExecutor(max_workers=16)
+        self._dur_executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
         self._speed_mbps = 0.0
         self._download_autosave_ticks = 0
         self._last_download_save_sig = None
@@ -3176,9 +3183,14 @@ class ModernApp(ctk.CTk):
 
         self._top_toolbar_row2 = ctk.CTkFrame(self._top_toolbar_shell, fg_color='transparent')
 
+        active_sites = [k for k in SITES.keys() if k not in getattr(self, '_inactive_sites', set())]
+        if not active_sites:
+            active_sites = list(SITES.keys())
+        if self._site_key not in active_sites:
+            self._site_key = active_sites[0]
         self._site_var = ctk.StringVar(value=self._site_key)
         self._site_menu = SiteSelectorBar(
-            self._top_toolbar_row1, sites=list(SITES.keys()), selected=self._site_key,
+            self._top_toolbar_row1, sites=active_sites, selected=self._site_key,
             command=self._on_site_change)
         self._site_menu.pack(side='left')
 
@@ -5304,15 +5316,19 @@ class ModernApp(ctk.CTk):
                 cat_grid, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
                 border_width=1, border_color=BORDER_CARD)
             v_card.grid(row=0, column=v_idx, padx=4, sticky='nsew')
-
             v_thumb_holder = ctk.CTkFrame(v_card, fg_color=BG_SIDEBAR, height=180, corner_radius=6)
             v_thumb_holder.pack(fill='x', padx=4, pady=(4, 0))
             v_thumb_holder.pack_propagate(False)
 
+            v_cover_url = v_item.get('cover_url') or ''
+            has_v_cover = bool(v_cover_url and v_cover_url != v_thumb)
+
             v_lbl = ctk.CTkLabel(v_thumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
             v_lbl.pack(fill='both', expand=True)
             if v_thumb:
-                self._load_thumb_async(v_thumb, v_lbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
+                self._load_thumb_async(
+                    v_thumb, v_lbl, self._preview_gen, self._build_gen,
+                    getattr(self, '_site_key', ''), enable_blur=has_v_cover)
 
             v_dur_lbl = ctk.CTkLabel(
                 v_thumb_holder, text=f' {v_dur} ' if v_dur else '', text_color=WHITE, fg_color='#000000',
@@ -5341,6 +5357,27 @@ class ModernApp(ctk.CTk):
                 else:
                     threading.Thread(target=_fetch_cat_dur_bg, daemon=True).start()
 
+            v_cover_widgets = []
+            if has_v_cover:
+                vcov_w, vcov_h = 114, 166
+                vcov_frame = ctk.CTkFrame(
+                    v_thumb_holder, fg_color='#0a0a0f',
+                    corner_radius=4,
+                    border_width=1,
+                    border_color='#404055',
+                    width=vcov_w, height=vcov_h)
+                vcov_frame.place(relx=0.0, rely=0.5, anchor='w', x=6)
+                vcov_frame.pack_propagate(False)
+
+                vcov_lbl = ctk.CTkLabel(vcov_frame, text='', fg_color='transparent')
+                vcov_lbl.pack(fill='both', expand=True)
+
+                self._load_cover_overlay_async(
+                    v_cover_url, vcov_lbl, vcov_w, vcov_h,
+                    self._preview_gen, self._build_gen, getattr(self, '_site_key', '')
+                )
+                v_cover_widgets = [vcov_frame, vcov_lbl]
+
             # Subtitle and Dub outline badges — bottom-left of thumbnail
             try:
                 _sub_cache = SubtitleCache()
@@ -5357,7 +5394,7 @@ class ModernApp(ctk.CTk):
                 card_badges = []
             sub_badge_widgets = []
             if card_badges:
-                _bx = 5
+                _bx = 126 if has_v_cover else 5
                 for b in card_badges:
                     _text = b['text']
                     _color = b['color']
@@ -5413,9 +5450,55 @@ class ModernApp(ctk.CTk):
             _bind_v(v_card)
             _bind_v(v_thumb_holder)
             _bind_v(v_lbl)
+            for _cw in v_cover_widgets:
+                _bind_v(_cw)
             _bind_v(v_info)
             for _bw in sub_badge_widgets:
                 _bind_v(_bw)
+
+            if has_v_cover:
+                v_lbl._enable_blur = True
+                def _on_cat_enter(_e=None, lbl=v_lbl):
+                    if getattr(lbl, '_hovered', False):
+                        return
+                    lbl._hovered = True
+                    sharp = getattr(lbl, '_ctk_sharp_img', None)
+                    if sharp:
+                        try:
+                            lbl.configure(image=sharp)
+                            lbl._ctk_img_ref = sharp
+                        except Exception:
+                            pass
+
+                def _on_cat_leave(_e=None, c=v_card, lbl=v_lbl):
+                    def _check_leave():
+                        try:
+                            if not c.winfo_exists():
+                                return
+                            x, y = c.winfo_pointerxy()
+                            w = c.winfo_containing(x, y)
+                            is_inside = False
+                            while w:
+                                if w == c:
+                                    is_inside = True
+                                    break
+                                w = getattr(w, 'master', None)
+                            if not is_inside:
+                                lbl._hovered = False
+                                blurred = getattr(lbl, '_ctk_blurred_img', None)
+                                if blurred:
+                                    lbl.configure(image=blurred)
+                                    lbl._ctk_img_ref = blurred
+                        except Exception:
+                            pass
+                    c.after(40, _check_leave)
+
+                for _w in (v_card, v_thumb_holder, v_lbl, v_info, v_title_lbl, v_heart_btn, *v_cover_widgets, *sub_badge_widgets):
+                    try:
+                        _w.bind('<Enter>', _on_cat_enter, add='+')
+                        _w.bind('<Leave>', _on_cat_leave, add='+')
+                    except Exception:
+                        pass
 
     def _render_more_series_cards(self, series_frame, series_grid, series_count_lbl, series_vids, gen):
         """Render the 'More from this series' cards sorted by part / episode number."""
@@ -5487,12 +5570,16 @@ class ModernApp(ctk.CTk):
             v_thumb_holder.pack(fill='x', padx=4, pady=(4, 0))
             v_thumb_holder.pack_propagate(False)
 
+            s_cover_url = v_item.get('cover_url') or ''
+            has_s_cover = bool(s_cover_url and s_cover_url != v_thumb)
+
             v_lbl = ctk.CTkLabel(v_thumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
             v_lbl.pack(fill='both', expand=True)
             if v_thumb:
                 self._load_thumb_async(
                     v_thumb, v_lbl, self._preview_gen, self._build_gen,
-                    v_item.get('site_name') or getattr(self, '_site_key', '')
+                    v_item.get('site_name') or getattr(self, '_site_key', ''),
+                    enable_blur=has_s_cover
                 )
 
             # Part / Episode badge at top-left
@@ -5536,6 +5623,28 @@ class ModernApp(ctk.CTk):
                 else:
                     threading.Thread(target=_fetch_ser_dur_bg, daemon=True).start()
 
+            s_cover_widgets = []
+            if has_s_cover:
+                scov_w, scov_h = 114, 166
+                scov_frame = ctk.CTkFrame(
+                    v_thumb_holder, fg_color='#0a0a0f',
+                    corner_radius=4,
+                    border_width=1,
+                    border_color='#404055',
+                    width=scov_w, height=scov_h)
+                scov_frame.place(relx=0.0, rely=0.5, anchor='w', x=6)
+                scov_frame.pack_propagate(False)
+
+                scov_lbl = ctk.CTkLabel(scov_frame, text='', fg_color='transparent')
+                scov_lbl.pack(fill='both', expand=True)
+
+                self._load_cover_overlay_async(
+                    s_cover_url, scov_lbl, scov_w, scov_h,
+                    self._preview_gen, self._build_gen,
+                    v_item.get('site_name') or getattr(self, '_site_key', '')
+                )
+                s_cover_widgets = [scov_frame, scov_lbl]
+
             # Subtitle and Dub badges
             try:
                 _sub_cache = SubtitleCache()
@@ -5552,7 +5661,7 @@ class ModernApp(ctk.CTk):
                 card_badges = []
             sub_badge_widgets = []
             if card_badges:
-                _bx = 5
+                _bx = 126 if has_s_cover else 5
                 for b in card_badges:
                     _text = b['text']
                     _color = b['color']
@@ -5609,10 +5718,56 @@ class ModernApp(ctk.CTk):
             _bind_v(v_card)
             _bind_v(v_thumb_holder)
             _bind_v(v_lbl)
+            for _cw in s_cover_widgets:
+                _bind_v(_cw)
             _bind_v(v_info)
             _bind_v(v_title_lbl)
             for _bw in sub_badge_widgets:
                 _bind_v(_bw)
+
+            if has_s_cover:
+                v_lbl._enable_blur = True
+                def _on_ser_enter(_e=None, lbl=v_lbl):
+                    if getattr(lbl, '_hovered', False):
+                        return
+                    lbl._hovered = True
+                    sharp = getattr(lbl, '_ctk_sharp_img', None)
+                    if sharp:
+                        try:
+                            lbl.configure(image=sharp)
+                            lbl._ctk_img_ref = sharp
+                        except Exception:
+                            pass
+
+                def _on_ser_leave(_e=None, c=v_card, lbl=v_lbl):
+                    def _check_leave():
+                        try:
+                            if not c.winfo_exists():
+                                return
+                            x, y = c.winfo_pointerxy()
+                            w = c.winfo_containing(x, y)
+                            is_inside = False
+                            while w:
+                                if w == c:
+                                    is_inside = True
+                                    break
+                                w = getattr(w, 'master', None)
+                            if not is_inside:
+                                lbl._hovered = False
+                                blurred = getattr(lbl, '_ctk_blurred_img', None)
+                                if blurred:
+                                    lbl.configure(image=blurred)
+                                    lbl._ctk_img_ref = blurred
+                        except Exception:
+                            pass
+                    c.after(40, _check_leave)
+
+                for _w in (v_card, v_thumb_holder, v_lbl, v_info, v_title_lbl, v_heart_btn, *s_cover_widgets, *sub_badge_widgets):
+                    try:
+                        _w.bind('<Enter>', _on_ser_enter, add='+')
+                        _w.bind('<Leave>', _on_ser_leave, add='+')
+                    except Exception:
+                        pass
 
     def _discover_series_videos_bg(self, series_base, series_frame, series_grid, series_count_lbl,
                                    existing_vids, seen_urls, gen):
@@ -5620,10 +5775,12 @@ class ModernApp(ctk.CTk):
         def _worker():
             site_key = getattr(self, '_site_key', 'MissAV')
             cur_vid = getattr(self, '_preview_video', {}) or {}
+            is_search_all = bool(getattr(self, '_search_all_mode', False) or getattr(self, '_search_all_active', False))
+            target_sites = list(SITES.keys()) if is_search_all else [site_key]
             new_found = []
 
-            # 1. If HanimeTV, search entire in-memory catalog for all series parts
-            if site_key == 'HanimeTV' or 'hanime.tv' in str(cur_vid.get('url', '')).lower():
+            # 1. If HanimeTV in target_sites or (is_search_all and current video is HanimeTV)
+            if 'HanimeTV' in target_sites or (not is_search_all and (site_key == 'HanimeTV' or 'hanime.tv' in str(cur_vid.get('url', '')).lower())):
                 try:
                     from M3U8Sites.SiteHanimeTV import _load_catalog, _load_duration_cache
                     cat = _load_catalog()
@@ -5651,30 +5808,33 @@ class ModernApp(ctk.CTk):
                 except Exception:
                     pass
 
-            # 2. General site search using browser search
-            browser_cls = SITES.get(site_key, {}).get('browser')
-            if browser_cls and hasattr(browser_cls, 'search'):
-                search_terms = [series_base]
-                words = series_base.split()
-                if len(words) >= 3:
-                    search_terms.append(' '.join(words[:2]))
-                for term in search_terms:
-                    try:
-                        extra_vids = browser_cls.search(term)
-                    except Exception:
-                        extra_vids = []
-                    if isinstance(extra_vids, list):
-                        for ev in extra_vids:
-                            if not isinstance(ev, dict):
-                                continue
-                            ev_url = (ev.get('url') or ev.get('page_url') or '').strip()
-                            if ev_url and ev_url not in seen_urls and is_same_series(ev, cur_vid):
-                                _, p_num, p_lbl = extract_series_info(ev)
-                                ev['_series_part'] = p_num
-                                ev['_series_label'] = p_lbl
-                                ev['site_name'] = ev.get('site_name') or site_key
-                                seen_urls.add(ev_url)
-                                new_found.append(ev)
+            # 2. General site search across target sites
+            for s_key in target_sites:
+                if s_key == 'HanimeTV':
+                    continue  # Already handled via in-memory catalog
+                browser_cls = SITES.get(s_key, {}).get('browser')
+                if browser_cls and hasattr(browser_cls, 'search'):
+                    search_terms = [series_base]
+                    words = series_base.split()
+                    if len(words) >= 3:
+                        search_terms.append(' '.join(words[:2]))
+                    for term in search_terms:
+                        try:
+                            extra_vids = browser_cls.search(term)
+                        except Exception:
+                            extra_vids = []
+                        if isinstance(extra_vids, list):
+                            for ev in extra_vids:
+                                if not isinstance(ev, dict):
+                                    continue
+                                ev_url = (ev.get('url') or ev.get('page_url') or '').strip()
+                                if ev_url and ev_url not in seen_urls and is_same_series(ev, cur_vid):
+                                    _, p_num, p_lbl = extract_series_info(ev)
+                                    ev['_series_part'] = p_num
+                                    ev['_series_label'] = p_lbl
+                                    ev['site_name'] = ev.get('site_name') or s_key
+                                    seen_urls.add(ev_url)
+                                    new_found.append(ev)
 
             if not new_found:
                 return
@@ -6230,34 +6390,42 @@ class ModernApp(ctk.CTk):
         current_url = url
         all_candidates = []
         seen_cand_urls = set()
+        is_search_all = bool(getattr(self, '_search_all_mode', False) or getattr(self, '_search_all_active', False))
+        selected_site = getattr(self, '_site_key', '') or config.site_name_from_url(current_url) or (self._preview_video or {}).get('site_name', '')
+        norm_sel_site = (selected_site or '').lower()
 
         def _add_cand(v):
             if not isinstance(v, dict):
                 return
             u = (v.get('url') or v.get('page_url') or '').strip()
-            if u and u != current_url and u not in seen_cand_urls:
-                seen_cand_urls.add(u)
-                cand_tags = []
-                for k in ('tags', 'categories', 'keywords'):
-                    raw = v.get(k)
-                    if isinstance(raw, (list, tuple, set)):
-                        for x in raw:
-                            s = str(x).strip()
-                            if s and s not in cand_tags:
-                                cand_tags.append(s)
-                    elif raw:
-                        for part in str(raw).split(','):
-                            s = part.strip()
-                            if s and s not in cand_tags:
-                                cand_tags.append(s)
-                all_candidates.append({
-                    'url': u,
-                    'title': v.get('title') or u,
-                    'thumbnail': v.get('thumbnail') or v.get('img') or '',
-                    'duration': v.get('duration') or '',
-                    'site_name': v.get('site_name') or config.site_name_from_url(u),
-                    'tags': cand_tags,
-                })
+            if not u or u == current_url or u in seen_cand_urls:
+                return
+            cand_site = (v.get('site_name') or v.get('site') or config.site_name_from_url(u) or '').lower()
+            if not is_search_all and norm_sel_site and cand_site and cand_site != norm_sel_site:
+                return
+            seen_cand_urls.add(u)
+            cand_tags = []
+            for k in ('tags', 'categories', 'keywords'):
+                raw = v.get(k)
+                if isinstance(raw, (list, tuple, set)):
+                    for x in raw:
+                        s = str(x).strip()
+                        if s and s not in cand_tags:
+                            cand_tags.append(s)
+                elif raw:
+                    for part in str(raw).split(','):
+                        s = part.strip()
+                        if s and s not in cand_tags:
+                            cand_tags.append(s)
+            all_candidates.append({
+                'url': u,
+                'title': v.get('title') or u,
+                'thumbnail': v.get('thumbnail') or v.get('img') or '',
+                'duration': v.get('duration') or '',
+                'site_name': v.get('site_name') or config.site_name_from_url(u),
+                'tags': cand_tags,
+                'cover_url': v.get('cover_url') or '',
+            })
 
         for v in (self._preview_video or {}).get('related_vids', []):
             _add_cand(v)
@@ -6278,13 +6446,14 @@ class ModernApp(ctk.CTk):
             search_term = code_m.group(1).upper() if code_m else ''
             if search_term:
                 try:
-                    site_key = getattr(self, '_site_key', 'MissAV')
-                    browser_cls = SITES.get(site_key, {}).get('browser')
-                    if browser_cls and hasattr(browser_cls, 'search'):
-                        extra_vids = browser_cls.search(search_term)
-                        if isinstance(extra_vids, list):
-                            for ev in extra_vids:
-                                _add_cand(ev)
+                    target_sites = list(SITES.keys()) if is_search_all else [selected_site or getattr(self, '_site_key', 'MissAV')]
+                    for s_k in target_sites:
+                        browser_cls = SITES.get(s_k, {}).get('browser')
+                        if browser_cls and hasattr(browser_cls, 'search'):
+                            extra_vids = browser_cls.search(search_term)
+                            if isinstance(extra_vids, list):
+                                for ev in extra_vids:
+                                    _add_cand(ev)
                 except Exception:
                     pass
 
@@ -6361,6 +6530,8 @@ class ModernApp(ctk.CTk):
         self._preview_right_sidebar = right_sidebar
         self._preview_bottom_related = bottom_related
         self._preview_related_vids = related_vids
+        self._preview_related_pool = rotated_pool
+        self._preview_shown_related_urls = {v.get('url') for v in related_vids if v.get('url')}
         self._preview_layout_mode = None
         self._preview_layout_cols = None
 
@@ -7661,6 +7832,7 @@ class ModernApp(ctk.CTk):
                             self._inactive_sites.discard(name)
                         else:
                             self._inactive_sites.add(name)
+                        config.set_inactive_sites(self._inactive_sites)
                         self._rebuild_site_selector()
                         self._refresh_source_btn_styles()
                     return _toggle
@@ -7703,6 +7875,7 @@ class ModernApp(ctk.CTk):
 
             def _activate_all():
                 self._inactive_sites.clear()
+                config.set_inactive_sites(self._inactive_sites)
                 self._rebuild_site_selector()
                 self._refresh_source_btn_styles()
 
@@ -7957,7 +8130,8 @@ class ModernApp(ctk.CTk):
                 merged.extend(videos)
 
         threads = []
-        for site_key in _ALL_SITE_KEYS:
+        target_search_all_sites = [k for k in _ALL_SITE_KEYS if k not in getattr(self, '_inactive_sites', set())] or list(_ALL_SITE_KEYS)
+        for site_key in target_search_all_sites:
             try:
                 url = self._search_all_page_url(site_key, query, page_snapshot)
             except Exception:
@@ -8216,6 +8390,9 @@ class ModernApp(ctk.CTk):
                 else:
                     threading.Thread(target=_fetch_card_dur_bg, daemon=True).start()
 
+            cover_url = v.get('cover_url') or ''
+            has_cover_overlay = bool(cover_url and cover_url != thumb_url)
+
             # Subtitle and Dub outline badges — bottom-left of thumbnail
             try:
                 card_badges = _detect_video_card_badges(
@@ -8225,7 +8402,7 @@ class ModernApp(ctk.CTk):
                 card_badges = []
             sub_badge_widgets = []
             if card_badges:
-                _bx = 7
+                _bx = 118 if has_cover_overlay else 7
                 for b in card_badges:
                     _text = b['text']
                     _color = b['color']
@@ -8255,6 +8432,30 @@ class ModernApp(ctk.CTk):
                     font=('Consolas', 8, 'bold'))
                 site_lbl.place(relx=0, rely=0, anchor='nw', x=7, y=7)
                 site_lbl.lift()
+
+            # Portrait box-art cover overlay on the left
+            cover_widgets = []
+            if has_cover_overlay:
+                cov_w, cov_h = 114, 166
+                cov_frame = ctk.CTkFrame(
+                    thumb_holder, fg_color='#0a0a0f',
+                    corner_radius=4,
+                    border_width=1,
+                    border_color='#404055',
+                    width=cov_w, height=cov_h)
+                cov_frame.place(relx=0.0, rely=0.5, anchor='w', x=7)
+                cov_frame.pack_propagate(False)
+
+                cov_lbl = ctk.CTkLabel(cov_frame, text='', fg_color='transparent')
+                cov_lbl.pack(fill='both', expand=True)
+
+                self._load_cover_overlay_async(
+                    cover_url, cov_lbl, cov_w, cov_h,
+                    gen, build_gen, src_site or self._site_key
+                )
+                cover_widgets = [cov_frame, cov_lbl]
+                if site_lbl is not None:
+                    site_lbl.lift()
 
             # ── Title (clean 2-line max) ──
             title_text = title[:65] + '…' if len(title) > 65 else title
@@ -8340,20 +8541,69 @@ class ModernApp(ctk.CTk):
             _bind_click(card)
             _bind_click(thumb_holder)
             _bind_click(thumb_lbl)
+            for _cw in cover_widgets:
+                _bind_click(_cw)
             for _bw in sub_badge_widgets:
                 _bind_click(_bw)
             if site_lbl is not None:
                 _bind_click(site_lbl)
 
+            # Card hover unblur effect when overlay cover is present
+            if has_cover_overlay:
+                thumb_lbl._enable_blur = True
+                def _on_card_enter(_e=None, lbl=thumb_lbl):
+                    if getattr(lbl, '_hovered', False):
+                        return
+                    lbl._hovered = True
+                    sharp = getattr(lbl, '_ctk_sharp_img', None)
+                    if sharp:
+                        try:
+                            lbl.configure(image=sharp)
+                            lbl._ctk_img_ref = sharp
+                        except Exception:
+                            pass
+
+                def _on_card_leave(_e=None, c=card, lbl=thumb_lbl):
+                    def _check_leave():
+                        try:
+                            if not c.winfo_exists():
+                                return
+                            x, y = c.winfo_pointerxy()
+                            w = c.winfo_containing(x, y)
+                            is_inside = False
+                            while w:
+                                if w == c:
+                                    is_inside = True
+                                    break
+                                w = getattr(w, 'master', None)
+                            if not is_inside:
+                                lbl._hovered = False
+                                blurred = getattr(lbl, '_ctk_blurred_img', None)
+                                if blurred:
+                                    lbl.configure(image=blurred)
+                                    lbl._ctk_img_ref = blurred
+                        except Exception:
+                            pass
+                    c.after(40, _check_leave)
+
+                for _w in (card, thumb_holder, thumb_lbl, title_lbl, bottom, *cover_widgets, *sub_badge_widgets, card_heart_btn, preview_btn, sel_btn):
+                    try:
+                        _w.bind('<Enter>', _on_card_enter, add='+')
+                        _w.bind('<Leave>', _on_card_leave, add='+')
+                    except Exception:
+                        pass
+
             # Background thumbnail load
             if thumb_url:
                 self._load_thumb_async(
-                    thumb_url, thumb_lbl, gen, build_gen, src_site or self._site_key)
+                    thumb_url, thumb_lbl, gen, build_gen, src_site or self._site_key,
+                    enable_blur=has_cover_overlay)
             else:
                 thumb_lbl.configure(text=T('no_thumbnail'))
 
     def _load_thumb_async(self, thumb_url: str, label: ctk.CTkLabel,
-                          gen: int, build_gen: int, site_key: str = ''):
+                          gen: int, build_gen: int, site_key: str = '',
+                          enable_blur: bool = False):
         """Fetch thumbnail in a background thread; marshal result back to the
         main thread via .after() so Tk widget updates stay thread-safe.
         The gen counter prevents stale thumbs from polluting a newer page."""
@@ -8388,15 +8638,38 @@ class ModernApp(ctk.CTk):
                     holder = label.master
                     cw = holder.winfo_width() if (holder and holder.winfo_exists()) else 0
                     if cw <= 4:
-                        cw = int(getattr(self, '_last_estimated_cw', 260))  # fallback before layout is realised
+                        cw = int(self.__dict__.get('_last_estimated_cw', 260))  # fallback before layout is realised
                     label._raw_img = img
 
-                    # Height-fitted image rendering (image height 100% matches thumbnail view section height)
                     target_ch = max(1, min(190, int(round(cw * 0.61))))
                     ctk_img = _create_height_fitted_hd_ctk_image(img, cw, target_ch)
-                    label.configure(image=ctk_img, text='', height=target_ch)
-                    label._ctk_img_ref = ctk_img
+                    label._ctk_sharp_img = ctk_img
+
+                    should_blur = enable_blur or getattr(label, '_enable_blur', False)
+                    if should_blur:
+                        try:
+                            from PIL import ImageFilter
+                            blurred_raw = img.filter(ImageFilter.GaussianBlur(radius=7))
+                            ctk_blur = _create_height_fitted_hd_ctk_image(blurred_raw, cw, target_ch)
+                            label._ctk_blurred_img = ctk_blur
+                        except Exception:
+                            label._ctk_blurred_img = ctk_img
+                    else:
+                        label._ctk_blurred_img = None
+
+                    active_img = label._ctk_sharp_img if getattr(label, '_hovered', False) else (label._ctk_blurred_img or ctk_img)
+                    label.configure(image=active_img, text='', height=target_ch)
+                    label._ctk_img_ref = active_img
                     label._last_w = cw
+
+                    # Ensure any overlay children inside holder stay in front of the background thumbnail
+                    if holder and hasattr(holder, 'winfo_children') and holder.winfo_exists():
+                        try:
+                            for child in holder.winfo_children():
+                                if child != label:
+                                    child.lift()
+                        except Exception:
+                            pass
 
                     # Re-scale on card width change keeping image height 100% matched to thumbnail viewer height
                     if not getattr(label, '_has_resize_bind', False) and holder and holder.winfo_exists():
@@ -8405,18 +8678,75 @@ class ModernApp(ctk.CTk):
                             if not label.winfo_exists():
                                 return
                             w = event.width
-                            if w > 4 and getattr(label, '_last_w', 0) != w:
+                            if w > 4 and abs(getattr(label, '_last_w', 0) - w) >= 12:
                                 label._last_w = w
                                 raw = getattr(label, '_raw_img', None)
                                 if raw:
                                     tch = max(1, min(190, int(round(w * 0.61))))
                                     ci = _create_height_fitted_hd_ctk_image(raw, w, tch)
+                                    label._ctk_sharp_img = ci
+                                    if getattr(label, '_enable_blur', False) or enable_blur:
+                                        try:
+                                            from PIL import ImageFilter
+                                            b_raw = raw.filter(ImageFilter.GaussianBlur(radius=7))
+                                            label._ctk_blurred_img = _create_height_fitted_hd_ctk_image(b_raw, w, tch)
+                                        except Exception:
+                                            label._ctk_blurred_img = ci
+                                    cur = label._ctk_sharp_img if getattr(label, '_hovered', False) else (label._ctk_blurred_img or ci)
                                     try:
-                                        label.configure(image=ci, height=tch)
-                                        label._ctk_img_ref = ci
+                                        label.configure(image=cur, height=tch)
+                                        label._ctk_img_ref = cur
+                                        for ch in holder.winfo_children():
+                                            if ch != label:
+                                                ch.lift()
                                     except Exception:
                                         pass
                         holder.bind('<Configure>', _on_resize, add='+')
+                except Exception:
+                    pass
+            self._ui(_apply, gen=build_gen)
+        try:
+            self._thumb_executor.submit(_worker)
+        except RuntimeError:
+            pass
+
+    def _load_cover_overlay_async(self, cover_url: str, label: ctk.CTkLabel,
+                                  target_w: int, target_h: int,
+                                  gen: int, build_gen: int, site_key: str = ''):
+        """Fetch portrait box-art cover in a background thread and render it
+        as a sharp High-DPI overlay badge on the left side of the thumbnail."""
+        def _worker():
+            if self._is_closing or build_gen != self._build_gen:
+                return
+            if gen != self._grid_gen and gen != getattr(self, '_preview_gen', -1):
+                return
+            img = _fetch_thumbnail(cover_url, site_key)
+            if img is None:
+                return
+            def _apply():
+                if self._is_closing or build_gen != self._build_gen:
+                    return
+                if gen != self._grid_gen and gen != getattr(self, '_preview_gen', -1):
+                    return
+                try:
+                    if not label.winfo_exists():
+                        return
+                    tw2, th2 = max(1, target_w * 2), max(1, target_h * 2)
+                    ratio = max(tw2 / max(1, img.width), th2 / max(1, img.height))
+                    nw = int(img.width * ratio)
+                    nh = int(img.height * ratio)
+                    scaled = img.resize((max(1, nw), max(1, nh)), Image.LANCZOS)
+                    left = max(0, (scaled.width - tw2) // 2)
+                    top = max(0, (scaled.height - th2) // 2)
+                    cropped = scaled.crop((left, top, min(scaled.width, left + tw2), min(scaled.height, top + th2)))
+                    ctk_img = ctk.CTkImage(light_image=cropped, dark_image=cropped, size=(target_w, target_h))
+                    label.configure(image=ctk_img, text='')
+                    label._ctk_img_ref = ctk_img
+                    try:
+                        if label.master and label.master.winfo_exists():
+                            label.master.lift()
+                    except Exception:
+                        pass
                 except Exception:
                     pass
             self._ui(_apply, gen=build_gen)
@@ -8647,6 +8977,42 @@ class ModernApp(ctk.CTk):
             except Exception:
                 pass
 
+    def _shuffle_preview_related(self):
+        if getattr(self, '_browse_mode', '') != 'preview':
+            return
+        pool = list(getattr(self, '_preview_related_pool', []) or [])
+        cur_url = (getattr(self, '_preview_video', {}) or {}).get('url', '')
+        shown = set(getattr(self, '_preview_shown_related_urls', set()))
+
+        pool = [v for v in pool if v.get('url') and v.get('url') != cur_url]
+        if not pool:
+            return
+
+        import random
+        unseen = [v for v in pool if v.get('url') not in shown]
+        if len(unseen) >= 10:
+            new_selection = random.sample(unseen, 10)
+        elif unseen:
+            filler = [v for v in pool if v.get('url') not in {u.get('url') for u in unseen}]
+            new_selection = unseen + random.sample(filler, min(10 - len(unseen), len(filler)))
+        else:
+            shown.clear()
+            new_selection = random.sample(pool, min(10, len(pool)))
+
+        for v in new_selection:
+            shown.add(v.get('url'))
+        self._preview_shown_related_urls = shown
+        self._preview_related_vids = new_selection
+        self._preview_layout_mode = None
+        self._preview_layout_cols = None
+        try:
+            w = self.winfo_width() / max(self._get_window_scaling(), 1.0)
+            if w <= 1:
+                w = 1200
+        except Exception:
+            w = 1200
+        self._update_preview_layout(w)
+
     def _update_preview_layout(self, logical_width: float):
         if getattr(self, '_browse_mode', '') != 'preview':
             return
@@ -8700,7 +9066,7 @@ class ModernApp(ctk.CTk):
             left_main.pack(side='left', fill='both', expand=True, padx=(0, 16))
 
             hdr_frame = ctk.CTkFrame(right_sidebar, fg_color='transparent')
-            hdr_frame.pack(fill='x', padx=10, pady=(0, 10))
+            hdr_frame.pack(fill='x', padx=10, pady=(12, 10))
 
             ctk.CTkButton(
                 hdr_frame,
@@ -8717,7 +9083,24 @@ class ModernApp(ctk.CTk):
 
             ctk.CTkLabel(
                 hdr_frame, text='Related Videos', text_color=TEXT_PRI,
-                font=(ui_font(), 14, 'bold')).pack(side='left')
+                font=(ui_font(), 14, 'bold')).pack(side='left', padx=(0, 8))
+
+            shuffle_btn = ctk.CTkButton(
+                hdr_frame,
+                text='Shuffle',
+                width=60,
+                height=24,
+                corner_radius=12,
+                fg_color=BG_CARD,
+                border_width=1,
+                border_color=BORDER,
+                hover_color=BG_CARD_HOVER,
+                text_color=TEXT_SEC,
+                font=(ui_font(), 10, 'bold'),
+                command=self._shuffle_preview_related
+            )
+            shuffle_btn.pack(side='right', padx=(8, 0))
+
             for rv in related_vids:
                 self._render_single_related_card(right_sidebar, rv, is_grid=False)
         else:
@@ -8743,7 +9126,23 @@ class ModernApp(ctk.CTk):
 
             ctk.CTkLabel(
                 hdr_frame, text='Related Videos', text_color=TEXT_PRI,
-                font=(ui_font(), 14, 'bold')).pack(side='left')
+                font=(ui_font(), 14, 'bold')).pack(side='left', padx=(0, 8))
+
+            shuffle_btn = ctk.CTkButton(
+                hdr_frame,
+                text='Shuffle',
+                width=60,
+                height=24,
+                corner_radius=12,
+                fg_color=BG_CARD,
+                border_width=1,
+                border_color=BORDER,
+                hover_color=BG_CARD_HOVER,
+                text_color=TEXT_SEC,
+                font=(ui_font(), 10, 'bold'),
+                command=self._shuffle_preview_related
+            )
+            shuffle_btn.pack(side='right', padx=(8, 0))
 
             grid_frame = ctk.CTkFrame(bottom_container, fg_color='transparent')
             grid_frame.pack(fill='x', pady=(0, 16))
@@ -8780,6 +9179,9 @@ class ModernApp(ctk.CTk):
             img_height = 180
             wrap_w = 320
 
+        r_cover_url = rv.get('cover_url') or ''
+        has_r_cover = bool(r_cover_url and r_cover_url != r_thumb)
+
         # Top Preview Image Container (framed preview holder)
         rthumb_holder = ctk.CTkFrame(rcard, fg_color='#0a0a0d', height=img_height, corner_radius=6)
         rthumb_holder.pack(fill='x', padx=6, pady=(6, 0))
@@ -8788,7 +9190,9 @@ class ModernApp(ctk.CTk):
         rlbl = ctk.CTkLabel(rthumb_holder, text='', text_color=TEXT_DIM, font=(ui_font(), 9))
         rlbl.pack(fill='both', expand=True)
         if r_thumb:
-            self._load_thumb_async(r_thumb, rlbl, self._preview_gen, self._build_gen, getattr(self, '_site_key', ''))
+            self._load_thumb_async(
+                r_thumb, rlbl, self._preview_gen, self._build_gen,
+                getattr(self, '_site_key', ''), enable_blur=has_r_cover)
 
         r_dur_lbl = ctk.CTkLabel(
             rthumb_holder, text=f' {r_dur} ' if r_dur else '', text_color=WHITE, fg_color='#000000',
@@ -8817,6 +9221,32 @@ class ModernApp(ctk.CTk):
             else:
                 threading.Thread(target=_fetch_rel_dur_bg, daemon=True).start()
 
+        r_cover_widgets = []
+        if has_r_cover:
+            if is_grid:
+                rcov_h = 86 if cols == 3 else (102 if cols == 2 else 118)
+                rcov_w = int(round(rcov_h * 0.68))
+            else:
+                rcov_h = 166
+                rcov_w = 114
+            rcov_frame = ctk.CTkFrame(
+                rthumb_holder, fg_color='#0a0a0f',
+                corner_radius=4,
+                border_width=1,
+                border_color='#404055',
+                width=rcov_w, height=rcov_h)
+            rcov_frame.place(relx=0.0, rely=0.5, anchor='w', x=6)
+            rcov_frame.pack_propagate(False)
+
+            rcov_lbl = ctk.CTkLabel(rcov_frame, text='', fg_color='transparent')
+            rcov_lbl.pack(fill='both', expand=True)
+
+            self._load_cover_overlay_async(
+                r_cover_url, rcov_lbl, rcov_w, rcov_h,
+                self._preview_gen, self._build_gen, getattr(self, '_site_key', '')
+            )
+            r_cover_widgets = [rcov_frame, rcov_lbl]
+
         # Subtitle and Dub outline badges — bottom-left of thumbnail
         try:
             _sub_cache = SubtitleCache()
@@ -8833,7 +9263,7 @@ class ModernApp(ctk.CTk):
             card_badges = []
         sub_badges = []
         if card_badges:
-            _bx = 5
+            _bx = (rcov_w + 10) if has_r_cover else 5
             for b in card_badges:
                 _text = b['text']
                 _color = b['color']
@@ -8907,9 +9337,55 @@ class ModernApp(ctk.CTk):
         _bind_rv(rcard)
         _bind_rv(rthumb_holder)
         _bind_rv(rlbl)
+        for _cw in r_cover_widgets:
+            _bind_rv(_cw)
         _bind_rv(rinfo)
         for _bw in sub_badges:
             _bind_rv(_bw)
+
+        if has_r_cover:
+            rlbl._enable_blur = True
+            def _on_rel_enter(_e=None, lbl=rlbl):
+                if getattr(lbl, '_hovered', False):
+                    return
+                lbl._hovered = True
+                sharp = getattr(lbl, '_ctk_sharp_img', None)
+                if sharp:
+                    try:
+                        lbl.configure(image=sharp)
+                        lbl._ctk_img_ref = sharp
+                    except Exception:
+                        pass
+
+            def _on_rel_leave(_e=None, c=rcard, lbl=rlbl):
+                def _check_leave():
+                    try:
+                        if not c.winfo_exists():
+                            return
+                        x, y = c.winfo_pointerxy()
+                        w = c.winfo_containing(x, y)
+                        is_inside = False
+                        while w:
+                            if w == c:
+                                is_inside = True
+                                break
+                            w = getattr(w, 'master', None)
+                        if not is_inside:
+                            lbl._hovered = False
+                            blurred = getattr(lbl, '_ctk_blurred_img', None)
+                            if blurred:
+                                lbl.configure(image=blurred)
+                                lbl._ctk_img_ref = blurred
+                    except Exception:
+                        pass
+                c.after(40, _check_leave)
+
+            for _w in (rcard, rthumb_holder, rlbl, rinfo, r_title_lbl, r_heart_btn, *r_cover_widgets, *sub_badges):
+                try:
+                    _w.bind('<Enter>', _on_rel_enter, add='+')
+                    _w.bind('<Leave>', _on_rel_leave, add='+')
+                except Exception:
+                    pass
 
     def _on_card_heart_click(self, video: dict, url: str, btn_widget=None):
         target_url = url or (video or {}).get('url') or (video or {}).get('page_url') or ''
@@ -9039,6 +9515,7 @@ class ModernApp(ctk.CTk):
         if not active_sites:
             active_sites = list(SITES.keys())
             self._inactive_sites.clear()
+            config.set_inactive_sites(self._inactive_sites)
 
         old_menu = getattr(self, '_site_menu', None)
         if old_menu:
@@ -9373,15 +9850,26 @@ class ModernApp(ctk.CTk):
             self._active_tag_slug = None
             self._active_tag_url = None
         self._active_entity = {'kind': kind, 'name': name, 'url': url}
-        # Fallback chain for showing every title the entity is part of:
-        #   1) the exact page (if one was passed/known),
-        #   2) a quick search using the clicked name — on the current site,
-        #      then on the other supported sites,
-        #   3) searches using the other name variants found in the metadata
-        #      (e.g. kanji vs. romaji spellings of the same actress).
-        # Each candidate (url, site) is tried only if the previous one returns
-        # nothing, so a black screen is never the outcome.
-        order = [self._site_key] + [s for s in _ALL_SITE_KEYS if s != self._site_key]
+
+        # If Search from All is active, search across all sites simultaneously
+        if getattr(self, '_search_all_mode', False) and name:
+            self._search_all_active = True
+            self._search_all_query = name
+            self._page = 1
+            self._last_loaded_page = 1
+            self._has_next = True
+            self._browse_blocked = False
+            self._browse_empty_message = ''
+            self._selected_urls.clear()
+            self._selected_source_subtitle_evidence.clear()
+            self._update_selection_count()
+            self._show_search_all_heading(name)
+            self._rebuild_sidebar()
+            self._load_page()
+            return
+
+        # Otherwise, restrict to the user's selected site
+        order = [self._site_key]
         candidates = []
 
         def _add(url, site):
@@ -9403,7 +9891,7 @@ class ModernApp(ctk.CTk):
             return
         self._exit_search_all_view()
         self._entity_candidates = candidates
-        self._entity_search_pending = len(candidates) > 1
+        self._entity_search_pending = False
         self._current_base_url = candidates[0][0]
         self._entity_site_key = candidates[0][1]
         self._page = 1

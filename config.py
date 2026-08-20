@@ -207,6 +207,28 @@ def set_subtitle_pref(pref):
         pass
 
 
+DEFAULT_INACTIVE_SITES = {'Hanime1', 'TnaFlix'}
+
+
+def get_inactive_sites():
+    prefs = _load_prefs()
+    if 'inactive_sites' in prefs:
+        val = prefs.get('inactive_sites')
+        if isinstance(val, (list, tuple, set)):
+            return {str(x).strip() for x in val if str(x).strip()}
+    return set(DEFAULT_INACTIVE_SITES)
+
+
+def set_inactive_sites(inactive_sites):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['inactive_sites'] = sorted(list({str(x).strip() for x in (inactive_sites or set()) if str(x).strip()}))
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
 def _normalize_recognition_quality(value):
     quality = str(value or '').strip().lower().replace('_', '-')
     aliases = {

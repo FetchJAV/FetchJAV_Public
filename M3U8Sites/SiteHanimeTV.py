@@ -247,7 +247,7 @@ class SiteHanimeTV(M3U8Crawler):
             for item in catalog:
                 if item.get('slug') == slug or item.get('slug') == raw_slug:
                     self._targetName = item.get('name') or slug
-                    self._imageUrl = item.get('cover_url') or item.get('poster_url')
+                    self._imageUrl = item.get('poster_url') or item.get('cover_url')
                     break
         if not self._targetName:
             self._targetName = slug

@@ -517,6 +517,44 @@ def test_failed_thumbnail_replaces_loading_placeholder(monkeypatch):
     assert configured[-1]['text'] == gui_modern.T('no_thumbnail')
 
 
+def test_successful_thumbnail_applies_image_to_label(monkeypatch):
+    configured = []
+
+    class _ImmediateExecutor:
+        def submit(self, callback):
+            callback()
+
+    class _Label:
+        def __init__(self):
+            self.master = None
+
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            configured.append(kwargs)
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._is_closing = False
+    app._grid_gen = 7
+    app._preview_gen = 7
+    app._build_gen = 9
+    app._last_estimated_cw = 260
+    app._thumb_executor = _ImmediateExecutor()
+    app._ui = lambda callback, gen=None: callback()
+
+    mock_img = gui_modern.Image.new('RGB', (320, 180))
+    monkeypatch.setattr(gui_modern, '_fetch_thumbnail', lambda *_args: mock_img)
+
+    lbl = _Label()
+    app._load_thumb_async(
+        'https://assets-cdn.jable.tv/thumb.jpg', lbl, 7, 9, 'JableTV')
+
+    assert len(configured) == 1
+    assert configured[0]['image'] is not None
+    assert configured[0]['text'] == ''
+
+
 def test_stale_supjav_thumbnail_override_retries_without_credentials(
         monkeypatch):
     calls = []
@@ -698,6 +736,64 @@ def test_preview_mode_toggles_tag_sidebar_visibility():
     assert app._sidebar.pack_kwargs.get('before') is app._browse_workspace
     assert app._browse_grid_area.packed
     assert not app._preview_area.packed
+
+
+def test_preview_recommendations_respect_search_all_mode():
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._site_key = 'HanimeTV'
+    app._search_all_mode = False
+    app._search_all_active = False
+
+    video_items = [
+        {'title': 'Hanime 2', 'url': 'https://hanime.tv/videos/hentai/test-2', 'site_name': 'HanimeTV'},
+        {'title': 'Jable Video', 'url': 'https://jable.tv/videos/abc-123/', 'site_name': 'JableTV'},
+        {'title': 'MissAV Video', 'url': 'https://missav.ai/dm12/en/midv-001', 'site_name': 'MissAV'},
+    ]
+
+    current_url = 'https://hanime.tv/videos/hentai/test-1'
+
+    def collect(is_all):
+        app._search_all_mode = is_all
+        candidates = []
+        is_search_all = bool(getattr(app, '_search_all_mode', False) or getattr(app, '_search_all_active', False))
+        selected_site = getattr(app, '_site_key', '') or gui_modern.config.site_name_from_url(current_url)
+        norm_sel_site = (selected_site or '').lower()
+        for v in video_items:
+            u = v.get('url', '')
+            cand_site = (v.get('site_name') or gui_modern.config.site_name_from_url(u) or '').lower()
+            if not is_search_all and norm_sel_site and cand_site and cand_site != norm_sel_site:
+                continue
+            candidates.append(v)
+        return candidates
+
+    scoped = collect(False)
+    assert len(scoped) == 1
+    assert scoped[0]['site_name'] == 'HanimeTV'
+
+    all_sites = collect(True)
+    assert len(all_sites) == 3
+    assert {c['site_name'] for c in all_sites} == {'HanimeTV', 'JableTV', 'MissAV'}
+
+
+def test_default_inactive_sites():
+    assert 'Hanime1' in gui_modern.config.DEFAULT_INACTIVE_SITES
+    assert 'TnaFlix' in gui_modern.config.DEFAULT_INACTIVE_SITES
+
+
+def test_inactive_sites_persistence(monkeypatch, tmp_path):
+    prefs_file = tmp_path / 'ui_prefs.json'
+    monkeypatch.setattr(gui_modern.config, '_ui_prefs_path', lambda: str(prefs_file))
+
+    # Fresh state without prefs returns default inactive sites
+    assert gui_modern.config.get_inactive_sites() == {'Hanime1', 'TnaFlix'}
+
+    # Custom setting
+    gui_modern.config.set_inactive_sites({'Hanime1'})
+    assert gui_modern.config.get_inactive_sites() == {'Hanime1'}
+
+    # Enabling all sources
+    gui_modern.config.set_inactive_sites(set())
+    assert gui_modern.config.get_inactive_sites() == set()
 
 
 
