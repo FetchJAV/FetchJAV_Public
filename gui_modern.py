@@ -183,7 +183,7 @@ from ui_theme import (
 )
 import analytics
 
-APP_VERSION = '0.1.4'
+APP_VERSION = '0.1.5'
 
 # issue #24: startup breadcrumbs — no-op if crashlog unavailable
 try:
