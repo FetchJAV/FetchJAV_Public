@@ -796,4 +796,56 @@ def test_inactive_sites_persistence(monkeypatch, tmp_path):
     assert gui_modern.config.get_inactive_sites() == set()
 
 
+def test_site_switch_from_preview_directs_to_home_page(monkeypatch):
+    class DummyApp:
+        def __init__(self):
+            self._site_key = 'SupJav'
+            self._tab_keys = ['browse', 'history', 'downloads', 'settings']
+            self._active_tab_idx = 0
+            self._browse_mode = 'preview'
+            self._active_tag_slug = 'test'
+            self._active_tag_url = 'https://test'
+            self._categories = [{'name': 'Latest', 'url': 'https://missav.ai/new'}]
+            self._selected_urls = {'https://foo'}
+            self._selected_source_subtitle_evidence = {}
+            self._entity_candidates = []
+            self._entity_site_key = ''
+            self._entity_prev_base_url = ''
+            self._entity_prev_cat = ''
+            self._entity_prev_from_preview = False
+            self._entity_prev_preview_video = None
+            self._entity_search_pending = False
+            self._categories_loaded = False
+
+        def _select_tab(self, key):
+            self._active_tab_idx = self._tab_keys.index(key)
+
+        def _set_browse_mode(self, mode):
+            self._browse_mode = mode
+
+        def _exit_search_all_view(self):
+            pass
+
+        def _hide_page_heading(self):
+            pass
+
+        def _update_selection_count(self):
+            pass
+
+        def _rebuild_sidebar(self):
+            pass
+
+        def _load_categories(self):
+            self._categories_loaded = True
+
+    app = DummyApp()
+    gui_modern.ModernApp._on_site_change(app, 'MissAV')
+
+    assert app._site_key == 'MissAV'
+    assert app._browse_mode == 'grid'
+    assert app._tab_keys[app._active_tab_idx] == 'browse'
+    assert app._categories_loaded is True
+
+
+
 

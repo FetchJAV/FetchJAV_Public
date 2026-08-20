@@ -9619,6 +9619,10 @@ class ModernApp(ctk.CTk):
             analytics.track_site_switch(val)
         except Exception:
             pass
+        if getattr(self, '_tab_keys', ['browse'])[getattr(self, '_active_tab_idx', 0)] != 'browse':
+            self._select_tab('browse')
+        if getattr(self, '_browse_mode', 'grid') != 'grid':
+            self._set_browse_mode('grid')
         self._active_tag_slug = None
         self._active_tag_url = None
         self._entity_prev_base_url = ''
