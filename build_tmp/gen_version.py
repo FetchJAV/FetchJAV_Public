@@ -25,7 +25,7 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable('040904B0', [
-        StringStruct('CompanyName', 'FetchJAV'),
+        StringStruct('CompanyName', 'Fetch Media'),
         StringStruct('FileDescription', '{description}'),
         StringStruct('FileVersion', '{dotted}'),
         StringStruct('InternalName', '{internal_name}'),

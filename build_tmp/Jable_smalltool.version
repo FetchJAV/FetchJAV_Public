@@ -13,7 +13,7 @@ VSVersionInfo(
   kids=[
     StringFileInfo([
       StringTable('040904B0', [
-        StringStruct('CompanyName', 'FetchJAV'),
+        StringStruct('CompanyName', 'Fetch Media'),
         StringStruct('FileDescription', 'JableTV, MissAV & SupJav Batch Download Tool'),
         StringStruct('FileVersion', '0.1.4.0'),
         StringStruct('InternalName', 'Jable_smalltool'),
