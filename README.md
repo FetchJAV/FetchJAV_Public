@@ -195,103 +195,6 @@ Configure destination folders, default resolution preferences (Highest, 1080p, 7
 
 > **Windows Security Note:** SmartScreen reputation warnings and Defender Antivirus isolation are different events. Please read Windows Security Guide before filing issues. Verify `SHA256SUMS.txt` against GitHub provenance.
 
----
-
-## Installation
-
-### Windows Standalone (.exe)
-
-The simplest way to use FetchJAV. Download the pre-built executable — everything (Python, FFmpeg, dependencies) is bundled.
-
-```bash
-# Download the latest release
-# 
-
-# Place in any writable folder and double-click to run
-# No installation required
-```
-
-### From Source (macOS / Linux / Developer)
-
-Requires **Python 3.10+** and Tk (usually included with Python on macOS; may need `python3-tk` on Linux).
-
-```bash
-# Clone the repository
-git clone 
-cd FetchJAV
-
-# Create and activate a virtual environment (recommended)
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
-# Install dependencies
-python -m pip install -r requirements.txt
-
-# Run the application
-python main.py
-```
-
-### Docker / NAS Headless Deployment
-
-The public container image is available at `ghcr.io/deepanshuk2002/fetchjav:latest` for amd64 and arm64 architectures.
-
-```bash
-# Download a single URL to /downloads folder
-docker run --rm -v "/path/to/downloads:/downloads" \
-  ghcr.io/deepanshuk2002/fetchjav:latest ""
-
-# Multiple URLs
-docker run --rm -v "/path/to/downloads:/downloads" \
-  ghcr.io/deepanshuk2002/fetchjav:latest \
-  "" ""
-```
-
-#### Docker Compose
-
-```bash
-# Place URLs in a file or pass directly
-docker compose run --rm jabletv
-# Or pass URLs directly:
-docker compose run --rm jabletv ""
-```
-
-#### Docker Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DOWNLOAD_DIR` | Output directory inside the container | `/downloads` |
-| `RESOLUTION` | Video resolution preference | `highest` |
-| `MAX_WORKERS_PER_VIDEO` | Segment worker count per video (1–16) | auto |
-| `URLS` | Space-separated list of URLs | — |
-| `URL` | Single URL | — |
-| `URLS_FILE` | Path to text file with one URL per line | `/downloads/urls.txt` |
-
-#### Build Docker Image Locally
-
-```bash
-docker build -t fetchjav .
-docker run --rm -v "$(pwd)/downloads:/downloads" fetchjav "URL"
-```
-
----
-
-## Usage
-
-### GUI Usage
-
-```bash
-# Launch the modern CustomTkinter GUI (default)
-python main.py
-
-# Launch with a specific URL
-python main.py --url ""
-
-# Launch and download a random recommended video
-python main.py --random
-```
 
 **GUI Tabs:**
 
@@ -302,75 +205,6 @@ python main.py --random
 | **History** | View completed downloads with metadata and re-download options |
 | **Settings** | Configure themes, proxy, subtitle, resolution, and more |
 
-### CLI Usage
-
-Run FetchJAV headlessly without any GUI:
-
-```bash
-# Download a single URL
-python main.py --nogui --url "" --output "./download"
-
-# Specify worker count
-python main.py --nogui --url "" \
-  --output "./download" --max-workers-per-video 4
-
-# Download a random video
-python main.py --nogui --random --output "./download"
-```
-
-**CLI Flags:**
-
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--nogui` | Run in headless/CLI mode (no GUI) | off |
-| `--url URL` | Specific URL to download | — |
-| `--random` | Download a random recommended video | off |
-| `-o, --output DIR` | Output directory | `./download` |
-| `--max-workers-per-video N` | Segment workers per video (1–16) | auto |
-| `--hot-reload, -hr, --watch` | Enable dev hot-reload mode | off |
-| `--watch-interval SEC` | File watcher poll interval (seconds) | `1.0` |
-
-### Docker CLI
-
-```bash
-# Run via Python directly
-python docker_cli.py ""
-
-# Or via environment variables
-URLS="url1 url2" python docker_cli.py
-
-# Or use a URLs file (one URL per line)
-URLS_FILE=/downloads/urls.txt python docker_cli.py
-```
-
-### Hot Reload (Developer Mode)
-
-For developers — automatically restart the app when source files change:
-
-```bash
-# Default 1-second poll interval
-python main.py --hot-reload
-
-# Custom poll interval
-python main.py --hot-reload --watch-interval 0.5
-```
-
----
-
-## Configuration
-
-### Preferences File
-
-FetchJAV stores all configuration as JSON in:
-
-- **Windows:** `%APPDATA%/FetchJAV/`
-- **macOS/Linux:** `~/.config/FetchJAV/` (or equivalent)
-
-| File | Contents |
-|------|----------|
-| `ui_prefs.json` | Theme, language, resolution, subtitle mode, recognition quality, download concurrency, max workers, proxy settings, saved videos, view history, download history |
-| `cf_overrides.json` | Cloudflare clearance cookies per domain |
-| `download_queue.csv` | Persisted download queue |
 
 ### Key Settings
 
@@ -444,10 +278,6 @@ Optional cloud AI translation for generating English and Chinese subtitles from 
 | **Ollama** | Local models | No API key needed, runs locally |
 | **Google Gemini** | Gemini Pro | Requires API key |
 
-**Local Translation Models (Offline):**
-- FuguMT (ja→en) — CC BY-SA 4.0
-- OPUS-MT (en→zh) — Apache 2.0
-- Optional model pack: `Jable_local_translation_v1.zip`
 
 ### Online Subtitle Providers
 
@@ -620,9 +450,9 @@ FetchJAV/
 ├── img/                             # Icons, screenshots, favicons
 ├── dist/                            # Pre-built release executables
 │   ├── FetchJAV.exe
-│   ├── JableTV_Modern.exe
-│   ├── release_notes.md
-│   └── SHA256SUMS.txt
+│   ├── FetchJAV_Modern.exe
+│  
+│   
 │
 ├── requirements.txt                 # Python dependencies (GUI)
 ├── requirements-docker.txt          # Python dependencies (Docker)
@@ -642,31 +472,6 @@ FetchJAV/
 ## Testing
 
 FetchJAV includes a comprehensive test suite with **670+ tests** across 47 test modules.
-
-### Running Tests
-
-```bash
-# Run all tests
-python -m pytest tests -q
-
-# Run specific test modules
-python -m pytest tests/test_subtitle_system.py -q
-python -m pytest tests/test_subtitle_integration.py -q
-python -m pytest tests/test_jable_extract.py -q
-```
-
-### Test Coverage
-
-| Category | Test Files |
-|----------|------------|
-| **Site Scrapers** | `test_jable_extract.py`, `test_missav_parsing.py`, `test_supjav.py`, `test_tnaflix.py`, `test_hanime1.py`, `test_hanimetv.py` |
-| **Subtitle System** | `test_subtitle_system.py`, `test_subtitle_engine.py`, `test_subtitle_domain.py`, `test_subtitle_integration.py`, `test_subtitle_provider_integration.py`, `test_subtitle_provenance.py` |
-| **Whisper/ASR** | `test_whisper_quality.py`, `test_whisper_download_safety.py`, `test_whisper_diagnostic.py`, `test_whisper_diagnostic_entrypoints.py`, `test_reazonspeech_engine.py`, `test_reazonspeech_pack_builder.py`, `test_reazonspeech_supply_chain.py` |
-| **Translation** | `test_llm_translation.py`, `test_translation_settings.py`, `test_translation_settings_ui.py`, `test_translation_pack.py` |
-| **Config/Persistence** | `test_proxy.py`, `test_persistence.py`, `test_cf_override.py`, `test_resolution_pref.py`, `test_saved_videos.py`, `test_worker_limit.py` |
-| **UI/Features** | `test_ui_theme.py`, `test_video_preview.py`, `test_video_identity.py`, `test_hot_reload.py`, `test_locales.py`, `test_site_i18n.py` |
-| **Build/Packaging** | `test_updater.py`, `test_docker_cli.py`, `test_nogui_cli.py`, `test_pathlen.py` |
-| **Other** | `test_analytics.py`, `test_smalltool_*.py`, `test_crawler_naming.py` |
 
 ### Manual Regression
 
@@ -705,8 +510,6 @@ pyinstaller build_tmp/FetchJAV.spec
 | File | Description |
 |------|-------------|
 | `dist/FetchJAV.exe` | Main GUI executable |
-| `dist/JableTV_Modern.exe` | Same binary, alternate name |
-| `dist/SHA256SUMS.txt` | SHA-256 checksums for verification |
 
 ### CI/CD
 
@@ -735,15 +538,15 @@ GitHub Actions workflows in `.github/workflows/`:
 
 ```bash
 # Whisper diagnostic
-JABLE_WHISPER_DIAGNOSTIC_INPUT=file.wav \
-JABLE_WHISPER_DIAGNOSTIC_OUTPUT=result.json \
+FetchJAV_WHISPER_DIAGNOSTIC_INPUT=file.wav \
+FetchJAV_WHISPER_DIAGNOSTIC_OUTPUT=result.json \
 python main.py
 
 # Local translation diagnostic
-JABLE_LOCAL_TRANSLATION_DIAGNOSTIC_OUTPUT=result.json python main.py
+FetchJAV_LOCAL_TRANSLATION_DIAGNOSTIC_OUTPUT=result.json python main.py
 
 # LLM translation diagnostic
-JABLE_LLM_TRANSLATION_DIAGNOSTIC_OUTPUT=result.json python main.py
+FetchJAV_LLM_TRANSLATION_DIAGNOSTIC_OUTPUT=result.json python main.py
 ```
 
 ### Crash Logs
@@ -761,16 +564,6 @@ Contributions are welcome! When opening a GitHub Issue, please include:
 - If a crash occurred, attach `crash_log.txt`
 - Screenshots if the issue is UI-related
 
-### Development Setup
-
-```bash
-git clone 
-cd FetchJAV
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-pip install -r requirements.txt
-python main.py --hot-reload  # Auto-restart on file changes
-```
 
 ### Upstream Sync
 
@@ -786,24 +579,6 @@ FetchJAV is licensed under the **Apache License, Version 2.0** — see LICENSE f
 
 FetchJAV bundles or integrates with the following third-party components:
 
-| Component | License |
-|-----------|---------|
-| ReazonSpeech | Apache 2.0 |
-| sherpa-onnx | Apache 2.0 |
-| ONNX Runtime | MIT |
-| FuguMT (translation model) | CC BY-SA 4.0 |
-| OPUS-MT (translation model) | Apache 2.0 |
-| CTranslate2 | MIT |
-| SentencePiece | Apache 2.0 |
-| OpenCC | Apache 2.0 |
-| Intel OpenMP Runtime | Intel Simplified Software License |
-| NumPy | BSD-3-Clause |
-| PyYAML | MIT |
-| PyInstaller | GPL-2.0-or-later (with bootloader exception) |
-
-See THIRD_PARTY_NOTICES.md for full license texts.
-
----
 
 ## Disclaimer
 
@@ -816,7 +591,6 @@ This tool is provided for **personal research and legal backup purposes only**. 
 - **ALOS (Alos21750)** — Original author of JableTV-MissAV-Downloader-GUI-2026
 - **DeepanshuK2002** — FetchJAV fork maintainer and primary contributor
 - All contributors and testers who help improve FetchJAV
-- The open-source libraries that make this project possible
 
 ---
 
