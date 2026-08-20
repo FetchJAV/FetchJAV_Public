@@ -4,7 +4,7 @@
 
 Uses the GA4 Measurement Protocol / HTTP collection endpoint to asynchronously
 report telemetry and usage events (app launches, site switches, downloads, searches)
-to Firebase Analytics (Measurement ID: G-M00JJYLQ40).
+to Firebase Analytics (Measurement ID: G-5Q9PHPBB86).
 """
 
 import os
@@ -19,10 +19,11 @@ import requests
 
 import config
 
-MEASUREMENT_ID = "G-M00JJYLQ40"
+MEASUREMENT_ID = "G-5Q9PHPBB86"
+API_SECRET = "X4qGhQRBTmGWPw3ce9aHZw"
 FIREBASE_APP_ID = "1:535382138027:web:40afbe7b9bed9996deebee"
 PROJECT_ID = "fetchjav"
-COLLECT_ENDPOINT = "https://www.google-analytics.com/g/collect"
+COLLECT_ENDPOINT = "https://www.google-analytics.com/mp/collect"
 
 _event_queue: queue.Queue = queue.Queue(maxsize=1000)
 _worker_thread: Optional[threading.Thread] = None
@@ -82,7 +83,7 @@ def _analytics_worker():
     """Background daemon worker that drains the event queue and dispatches HTTP hits."""
     session = requests.Session()
     session.headers.update({
-        'User-Agent': f'FetchJAV-Desktop/0.1.1 ({platform.system()} {platform.release()})',
+        'User-Agent': f'FetchJAV-Desktop/0.1.3 ({platform.system()} {platform.release()})',
     })
 
     while True:
@@ -107,6 +108,7 @@ def _analytics_worker():
             query_params = {
                 'v': '2',
                 'tid': MEASUREMENT_ID,
+                'api_secret': API_SECRET,
                 'cid': cid,
                 'en': event_name,
                 '_p': str(int(time.time() * 1000)),
@@ -156,7 +158,7 @@ def track_event(event_name: str, params: Optional[Dict[str, Any]] = None) -> Non
         pass
 
 
-def track_app_open(version: str = '0.1.1', lang: str = 'en') -> None:
+def track_app_open(version: str = '0.1.3', lang: str = 'en') -> None:
     """Report application launch event."""
     track_event('app_open', {
         'app_name': 'FetchJAV',
