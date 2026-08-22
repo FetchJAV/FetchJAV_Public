@@ -838,7 +838,7 @@ class M3U8Crawler:
         """Download and decrypt one segment. task=(seq_num, url)"""
         seq_num, url = task
         saveName = self._seg_savename(seq_num)
-        if os.path.exists(saveName):
+        if os.path.exists(saveName) and os.path.getsize(saveName) > 0:
             # Segment already on disk (e.g. from a resumed job) — drop from pending
             with self._speed_lock:
                 self._pending_set.discard((seq_num, url))
@@ -866,16 +866,18 @@ class M3U8Crawler:
                 remain = len(self._pending_set)
                 elapsed = time.time() - self._speed_start
                 speed = self._bytes_downloaded / elapsed if elapsed > 0 else 0
-                done = self._job_total - remain
-                remain_time = (remain * elapsed / done) if done > 0 else 0
+                done_this_job = self._job_total - remain
+                total = len(self._tsList)
+                total_done = total - remain
+                remain_time = (remain * elapsed / done_this_job) if done_this_job > 0 else 0
                 if remain_time > 60:
                     rem_str = f"{remain_time//60:.0f}分 {remain_time%60:.0f}秒"
                 else:
                     rem_str = f"{remain_time:.0f}秒"
                 speed_str = f"{speed/1024:.0f} KB/s" if speed < 1024*1024 else f"{speed/1024/1024:.1f} MB/s"
-                print(f'\r下載中: {done}/{self._job_total} 片段 | {speed_str} | 剩餘 {rem_str}  ', end='', flush=True)
+                print(f'\r下載中: {total_done}/{total} 片段 | {speed_str} | 剩餘 {rem_str}  ', end='', flush=True)
                 if self._progress_callback:
-                    self._progress_callback(done, self._job_total, speed)
+                    self._progress_callback(total_done, total, speed)
             return True
         except Exception:
             return False
@@ -917,8 +919,14 @@ class M3U8Crawler:
         self._pending_set = set()
         for i, url in enumerate(self._tsList):
             saveName = self._seg_savename(i)
-            if not os.path.exists(saveName):
+            if not os.path.exists(saveName) or os.path.getsize(saveName) == 0:
                 self._pending_set.add((i, url))
+
+        total = len(self._tsList)
+        downloaded = total - len(self._pending_set)
+        if self._progress_callback and total > 0:
+            self._progress_callback(downloaded, total, 0)
+
         if self._pending_set:
             self._startCrawl()
 

@@ -12,6 +12,7 @@ hiddenimports = [
     'crashlog', 'certifi', 'faulthandler', 'updater', 'ssl_util',
     'subtitle_engine', 'subtitle_domain', 'llm_translation',
     'translation_settings', 'translation_settings_ui',
+    'video_ocr', 'watchlist', 'bs4', 'requests',
     'ctranslate2', 'ctranslate2._ext',
     'numpy._core._exceptions',
     'sentencepiece', 'sentencepiece._sentencepiece', 'opencc',

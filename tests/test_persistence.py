@@ -457,7 +457,7 @@ def test_auto_resume_pending_enqueues_only_flagged(monkeypatch):
 
     assert calls == [('https://example.test/flag', 'download')]
     assert flagged.resume is False
-    assert flagged.progress == 0
+    assert flagged.progress == 44
     assert flagged.speed == ''
     assert flagged.error == ''
     assert plain.resume is False

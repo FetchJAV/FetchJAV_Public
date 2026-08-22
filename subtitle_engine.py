@@ -5066,6 +5066,42 @@ def generate_subtitles(video_path: str, mode,
         if satisfied_by_source and _existing(paths['zh-TW'])
         else ()
     )
+
+    generated: list[str] = []
+
+    # Automated Hardcoded Video OCR Subtitle Extractor integration
+    try:
+        import config
+        ocr_enabled = bool(config.get_video_ocr_enabled())
+        ocr_backend = config.get_video_ocr_backend()
+        ocr_lang = config.get_video_ocr_lang()
+        ocr_mode = config.get_video_ocr_auto_mode()
+    except Exception:
+        ocr_enabled = True
+        ocr_backend = 'auto'
+        ocr_lang = 'zh'
+        ocr_mode = 'on_hardcoded_detected'
+
+    if ocr_enabled and not _existing(paths['zh-TW']):
+        if (satisfied_by_source and ocr_mode != 'manual_only') or ocr_mode == 'always':
+            try:
+                _notify(progress_callback, 'ocr_extract', 0)
+                ocr_ok = generate_subtitles_via_ocr(
+                    video_path=video_path,
+                    output_srt_path=paths['zh-TW'],
+                    lang=ocr_lang,
+                    backend=ocr_backend,
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check,
+                )
+                if ocr_ok and _existing(paths['zh-TW']):
+                    source_satisfied_files = (paths['zh-TW'],)
+                    generated.append(paths['zh-TW'])
+            except SubtitleCancelled:
+                raise
+            except Exception as ex:
+                logger.warning(f"Automated Video OCR extraction error: {ex}")
+
     if satisfied_by_source:
         requested = tuple(
             language for language in requested
@@ -5073,14 +5109,13 @@ def generate_subtitles(video_path: str, mode,
     if not requested:
         _notify(progress_callback, 'done', 100)
         return SubtitleResult(
-            source_satisfied_files, (),
+            source_satisfied_files, tuple(generated),
             satisfied_by_source=satisfied_by_source)
 
     profile = recognition_profile()
     asr_signature = _asr_signature(profile)
     media_identity = _media_identity(video_path)
     provenance_path = _subtitle_provenance_path(video_path)
-    generated: list[str] = []
     with _generation_slot(cancel_check):
         _check_cancel(cancel_check)
         manifest = _load_subtitle_provenance(provenance_path)
@@ -5248,23 +5283,37 @@ def generate_subtitles(video_path: str, mode,
 
             with _translation_profile_scope(translation_profile):
                 if 'en' in missing:
+                    en_source = japanese_source
+                    en_source_lang = 'ja'
+                    en_source_id = japanese_source_identity
+                    if not en_source and _existing(paths['zh-TW']):
+                        en_source = paths['zh-TW']
+                        en_source_lang = 'zh'
+                        en_source_id = 'file:' + _sha256(paths['zh-TW'])
+
                     if (
-                            not japanese_source
-                            or not japanese_source_identity
+                            not en_source
+                            or not en_source_id
                             or not translation_signature):
                         raise SubtitleError(
-                            'Japanese transcription is unavailable')
+                            'Japanese or Chinese transcription is unavailable')
                     _notify(progress_callback, 'translate_en', None)
-                    source_sha256 = _sha256(japanese_source)
+                    source_sha256 = _sha256(en_source)
                     try:
-                        translate_srt(
-                            japanese_source, paths['en'], 'en', 'translate_en',
-                            progress_callback, cancel_check)
+                        try:
+                            translate_srt(
+                                en_source, paths['en'], 'en', 'translate_en',
+                                progress_callback, cancel_check,
+                                source_language=en_source_lang)
+                        except TypeError:
+                            translate_srt(
+                                en_source, paths['en'], 'en', 'translate_en',
+                                progress_callback, cancel_check)
                         _record_derived_track(
                             manifest, 'en', paths['en'],
                             asr_signature, media_identity,
                             translation_signature,
-                            japanese_source_identity, source_sha256)
+                            en_source_id, source_sha256)
                         _save_subtitle_provenance(
                             provenance_path, manifest)
                         generated.append(paths['en'])
@@ -5281,11 +5330,17 @@ def generate_subtitles(video_path: str, mode,
                         else existing_english
                     )
                     if uses_api:
-                        # External providers translate Japanese directly to
-                        # the target. Video and audio never leave the computer.
-                        chinese_source = japanese_source
-                        chinese_source_language = 'ja'
-                        chinese_source_identity = japanese_source_identity
+                        # External providers translate Japanese or English directly to target
+                        chinese_source = japanese_source or english_source
+                        chinese_source_language = 'ja' if japanese_source else 'en'
+                        chinese_source_identity = (
+                            japanese_source_identity
+                            if japanese_source
+                            else (
+                                'file:' + _sha256(english_source)
+                                if english_source else None
+                            )
+                        )
                     else:
                         # The local path prefers Japanese so reviewed exact
                         # phrases win, then pivots unknown cues through English.
@@ -5335,3 +5390,30 @@ def generate_subtitles(video_path: str, mode,
             tuple(generated),
             satisfied_by_source=satisfied_by_source,
         )
+
+
+def generate_subtitles_via_ocr(
+    video_path: str,
+    output_srt_path: str,
+    lang: str = 'zh',
+    backend: str = 'auto',
+    progress_callback: Optional[ProgressCallback] = None,
+    cancel_check: Optional[CancelCheck] = None,
+) -> bool:
+    """Extract hardcoded / burnt-in subtitles directly from video frames using device OCR."""
+    import video_ocr
+    extractor = video_ocr.VideoOCRExtractor(backend=backend)
+
+    def _ocr_prog(pct, msg):
+        if cancel_check and cancel_check():
+            raise SubtitleCancelled("OCR extraction was cancelled")
+        _notify(progress_callback, 'ocr_extract', int(pct))
+
+    return extractor.extract_from_video(
+        video_path=video_path,
+        output_srt_path=output_srt_path,
+        lang=lang,
+        progress_cb=_ocr_prog,
+        cancel_check=cancel_check,
+    )
+

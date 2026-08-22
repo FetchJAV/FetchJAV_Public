@@ -1504,6 +1504,7 @@ class SmallToolWorker:
                     'transcribe_ja': 'subtitle_stage_transcribe_ja',
                     'translate_en': 'subtitle_stage_translate_en',
                     'translate_zh': 'subtitle_stage_translate_zh',
+                    'ocr_extract': 'video_ocr_running',
                     'done': 'subtitle_stage_done',
                 }
 

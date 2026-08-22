@@ -334,6 +334,7 @@ _SUBTITLE_STATE_BY_STAGE = {
     'transcribe_ja': '字幕辨識中',
     'translate_en': '字幕翻譯中',
     'translate_zh': '字幕翻譯中',
+    'ocr_extract': '硬字幕 OCR 辨識中',
 }
 
 
@@ -986,7 +987,6 @@ class DownloadManager:
             for item in self._items.values():
                 if item.resume and item.state in ('未完成', '已取消'):
                     item.resume = False
-                    item.progress = 0
                     item.speed = ''
                     item.error = ''
                     to_enqueue.append((item.url, item.dest or 'download'))
@@ -2645,6 +2645,82 @@ class ModernApp(ctk.CTk):
         except tk.TclError:
             pass
 
+    def _video_ocr_lang_values(self):
+        return [
+            T('video_ocr_lang_zh'),
+            T('video_ocr_lang_en'),
+            T('video_ocr_lang_ja'),
+            T('video_ocr_lang_auto'),
+        ]
+
+    def _video_ocr_lang_from_label(self, label):
+        return {
+            T('video_ocr_lang_zh'): 'zh',
+            T('video_ocr_lang_en'): 'en',
+            T('video_ocr_lang_ja'): 'ja',
+            T('video_ocr_lang_auto'): 'auto',
+        }.get(str(label or ''), 'zh')
+
+    def _video_ocr_lang_label(self, lang=None):
+        lang = config.get_video_ocr_lang() if lang is None else lang
+        return {
+            'zh': T('video_ocr_lang_zh'),
+            'en': T('video_ocr_lang_en'),
+            'ja': T('video_ocr_lang_ja'),
+            'auto': T('video_ocr_lang_auto'),
+        }.get(str(lang or '').lower(), T('video_ocr_lang_zh'))
+
+    def _video_ocr_backend_values(self):
+        return [
+            T('video_ocr_backend_auto'),
+            T('video_ocr_backend_rapidocr'),
+            T('video_ocr_backend_win_native'),
+            T('video_ocr_backend_easyocr'),
+            T('video_ocr_backend_pytesseract'),
+        ]
+
+    def _video_ocr_backend_from_label(self, label):
+        return {
+            T('video_ocr_backend_auto'): 'auto',
+            T('video_ocr_backend_rapidocr'): 'rapidocr',
+            T('video_ocr_backend_win_native'): 'win_native',
+            T('video_ocr_backend_easyocr'): 'easyocr',
+            T('video_ocr_backend_pytesseract'): 'pytesseract',
+        }.get(str(label or ''), 'auto')
+
+    def _video_ocr_backend_label(self, backend=None):
+        backend = config.get_video_ocr_backend() if backend is None else backend
+        return {
+            'auto': T('video_ocr_backend_auto'),
+            'rapidocr': T('video_ocr_backend_rapidocr'),
+            'win_native': T('video_ocr_backend_win_native'),
+            'easyocr': T('video_ocr_backend_easyocr'),
+            'pytesseract': T('video_ocr_backend_pytesseract'),
+        }.get(str(backend or '').lower(), T('video_ocr_backend_auto'))
+
+    def _video_ocr_automode_values(self):
+        return [
+            T('video_ocr_mode_on_detected'),
+            T('video_ocr_mode_always'),
+            T('video_ocr_mode_manual'),
+        ]
+
+    def _video_ocr_automode_from_label(self, label):
+        return {
+            T('video_ocr_mode_on_detected'): 'on_hardcoded_detected',
+            T('video_ocr_mode_always'): 'always',
+            T('video_ocr_mode_manual'): 'manual_only',
+        }.get(str(label or ''), 'on_hardcoded_detected')
+
+    def _video_ocr_automode_label(self, mode=None):
+        mode = config.get_video_ocr_auto_mode() if mode is None else mode
+        return {
+            'on_hardcoded_detected': T('video_ocr_mode_on_detected'),
+            'always': T('video_ocr_mode_always'),
+            'manual_only': T('video_ocr_mode_manual'),
+        }.get(str(mode or '').lower(), T('video_ocr_mode_on_detected'))
+
+
     def _on_lang_change(self, display_name):
         code = self._lang_code_by_name.get(display_name)
         if not code or code == get_lang():
@@ -3369,10 +3445,6 @@ class ModernApp(ctk.CTk):
         self._page_heading = ctk.CTkFrame(
             self._browse_grid_area, fg_color=BG_CARD, corner_radius=0,
             border_width=0)
-        self._page_heading_lbl = ctk.CTkLabel(
-            self._page_heading, text='', text_color=ACCENT,
-            font=(ui_font(), 13, 'bold'), anchor='e')
-        self._page_heading_lbl.pack(side='right', padx=16, pady=8)
         self._page_heading_close = ctk.CTkButton(
             self._page_heading, text=T('entity_close'), width=64, height=24,
             fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
@@ -3380,6 +3452,28 @@ class ModernApp(ctk.CTk):
             font=(ui_font(), 10), corner_radius=CONTROL_RADIUS,
             command=self._close_entity_page)
         self._page_heading_close.pack(side='left', padx=12, pady=6)
+
+        self._page_heading_star = ctk.CTkButton(
+            self._page_heading, text='☆', width=32, height=24,
+            fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+            font=(ui_font(), 12, 'bold'), corner_radius=CONTROL_RADIUS,
+            command=self._toggle_current_entity_watchlist)
+        self._page_heading_star.pack(side='left', padx=(0, 8), pady=6)
+
+        self._page_heading_refresh = ctk.CTkButton(
+            self._page_heading, text='🔄', width=32, height=24,
+            fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+            hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+            font=(ui_font(), 12), corner_radius=CONTROL_RADIUS,
+            command=self._refresh_current_page)
+        self._page_heading_refresh.pack(side='left', padx=(0, 8), pady=6)
+        ToolTip(self._page_heading_refresh, lambda: 'Refresh')
+
+        self._page_heading_lbl = ctk.CTkLabel(
+            self._page_heading, text='', text_color=ACCENT,
+            font=(ui_font(), 13, 'bold'), anchor='e')
+        self._page_heading_lbl.pack(side='right', padx=16, pady=8)
 
         self._grid_scroll = ctk.CTkScrollableFrame(
             self._browse_grid_area, fg_color=BG_DARK, corner_radius=0,
@@ -5135,10 +5229,14 @@ class ModernApp(ctk.CTk):
             url = ''
             if urls and idx < len(urls):
                 url = str(urls[idx] or '').strip()
+
+            chip_box = ctk.CTkFrame(flow, fg_color='transparent')
+            chip_box.pack(side='left', padx=(0, 8), pady=2)
+
             link = ctk.CTkLabel(
-                flow, text=name, text_color=TEXT_PRI,
+                chip_box, text=name, text_color=TEXT_PRI,
                 font=(ui_font(), 11))
-            link.pack(side='left', padx=(0, 10), pady=2)
+            link.pack(side='left', padx=(0, 2))
             try:
                 link.configure(cursor='hand2')
             except Exception:
@@ -5149,6 +5247,34 @@ class ModernApp(ctk.CTk):
                       lambda e, w=link: w.configure(text_color=ACCENT))
             link.bind('<Leave>',
                       lambda e, w=link: w.configure(text_color=TEXT_PRI))
+
+            # Inline star for watchlist toggle
+            is_w = config.is_in_watchlist(name, kind)
+            star_lbl = ctk.CTkLabel(
+                chip_box, text='★' if is_w else '☆',
+                text_color='#F59E0B' if is_w else TEXT_DIM,
+                font=(ui_font(), 10))
+            star_lbl.pack(side='left', padx=(0, 2))
+            try:
+                star_lbl.configure(cursor='hand2')
+            except Exception:
+                pass
+
+            def _make_star_toggle(s_lbl, n=name, k=kind):
+                def _toggle(event=None):
+                    watched = config.toggle_watchlist_item(n, k)
+                    s_lbl.configure(
+                        text='★' if watched else '☆',
+                        text_color='#F59E0B' if watched else TEXT_DIM
+                    )
+                    if hasattr(self, '_status_lbl') and self._status_lbl:
+                        self._status_lbl.configure(
+                            text=T('watchlist_added_toast', name=n) if watched
+                            else T('watchlist_removed_toast', name=n)
+                        )
+                return _toggle
+
+            star_lbl.bind('<Button-1>', _make_star_toggle(star_lbl, name, kind))
 
     def _refresh_preview_info(self):
         """Update the info card value labels and actress photo after enrichment."""
@@ -7274,7 +7400,7 @@ class ModernApp(ctk.CTk):
                 font=(ui_font(), 10),
                 wraplength=SETTINGS_INLINE_HELP_WRAP,
                 justify='left', anchor='w').pack(
-                    anchor='w', padx=(140, 20), pady=(0, 4))
+                    anchor='w', padx=(140, 20), pady=(0, 6))
 
             # Pre-download local models
             row_prefetch = ctk.CTkFrame(grp, fg_color='transparent')
@@ -7328,6 +7454,116 @@ class ModernApp(ctk.CTk):
                 wraplength=SETTINGS_INLINE_HELP_WRAP,
                 justify='left', anchor='w').pack(
                     anchor='w', padx=(140, 20), pady=(0, 4))
+
+            # ── Hardcoded Video OCR Subtitle Extractor (No Border) ──
+            row_ocr_toggle = ctk.CTkFrame(grp, fg_color='transparent')
+            row_ocr_toggle.pack(fill='x', pady=(14, 1))
+
+            ctk.CTkLabel(
+                row_ocr_toggle, text=T('video_ocr_toggle'),
+                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
+                width=130, anchor='w'
+            ).pack(side='left')
+
+            self._video_ocr_enabled_var = ctk.BooleanVar(value=config.get_video_ocr_enabled())
+            self._video_ocr_switch = ctk.CTkSwitch(
+                row_ocr_toggle,
+                text=T('video_ocr_enable_switch'),
+                variable=self._video_ocr_enabled_var,
+                command=self._on_video_ocr_toggle,
+                font=(ui_font(), 11, 'bold'),
+                text_color=TEXT_PRI,
+                progress_color=ACCENT,
+            )
+            self._video_ocr_switch.pack(side='left', padx=10)
+
+            ctk.CTkLabel(
+                grp, text=T('video_ocr_desc'),
+                text_color=TEXT_DIM, font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w'
+            ).pack(anchor='w', padx=(140, 20), pady=(0, 4))
+
+            # Row: OCR Backend & Target Language
+            row_ocr_cfg = ctk.CTkFrame(grp, fg_color='transparent')
+            row_ocr_cfg.pack(fill='x', pady=(3, 1))
+
+            ctk.CTkLabel(
+                row_ocr_cfg, text=T('video_ocr_backend_label'),
+                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
+                width=130, anchor='w'
+            ).pack(side='left')
+
+            self._video_ocr_backend_var = ctk.StringVar(value=self._video_ocr_backend_label())
+            ctk.CTkOptionMenu(
+                row_ocr_cfg, values=self._video_ocr_backend_values(),
+                variable=self._video_ocr_backend_var,
+                command=self._on_video_ocr_backend_change,
+                width=180, height=36, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)
+            ).pack(side='left', padx=10)
+
+            ctk.CTkLabel(
+                row_ocr_cfg, text=T('video_ocr_lang_label') + ':',
+                text_color=TEXT_PRI, font=(ui_font(), 11, 'bold'),
+                width=75, anchor='w'
+            ).pack(side='left', padx=(6, 4))
+
+            self._video_ocr_lang_var = ctk.StringVar(value=self._video_ocr_lang_label())
+            ctk.CTkOptionMenu(
+                row_ocr_cfg, values=self._video_ocr_lang_values(),
+                variable=self._video_ocr_lang_var,
+                command=self._on_video_ocr_lang_change,
+                width=175, height=36, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)
+            ).pack(side='left', padx=4)
+
+            # Row: Trigger mode & Manual Action
+            row_ocr_mode = ctk.CTkFrame(grp, fg_color='transparent')
+            row_ocr_mode.pack(fill='x', pady=(4, 1))
+
+            ctk.CTkLabel(
+                row_ocr_mode, text=T('video_ocr_automode_label'),
+                text_color=TEXT_PRI, font=(ui_font(), 12, 'bold'),
+                width=130, anchor='w'
+            ).pack(side='left')
+
+            self._video_ocr_automode_var = ctk.StringVar(value=self._video_ocr_automode_label())
+            ctk.CTkOptionMenu(
+                row_ocr_mode, values=self._video_ocr_automode_values(),
+                variable=self._video_ocr_automode_var,
+                command=self._on_video_ocr_automode_change,
+                width=240, height=36, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_CARD, button_color=BG_CARD,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 11, 'bold'), dropdown_font=(ui_font(), 11)
+            ).pack(side='left', padx=10)
+
+            self._video_ocr_extract_btn = ctk.CTkButton(
+                row_ocr_mode, text=T('video_ocr_extract_btn'),
+                width=140, height=34, corner_radius=8,
+                fg_color='transparent', border_width=1,
+                border_color=BORDER_HOVER, hover_color=BG_CARD_HOVER,
+                text_color=TEXT_PRI, font=(ui_font(), 10, 'bold'),
+                command=self._extract_video_ocr_dialog
+            )
+            self._video_ocr_extract_btn.pack(side='left', padx=(6, 0))
+
+            self._video_ocr_extract_status = ctk.CTkLabel(
+                row_ocr_mode, text='', text_color=TEXT_SEC,
+                font=(ui_font(), 10), anchor='w'
+            )
+            self._video_ocr_extract_status.pack(side='left', fill='x', expand=True, padx=10)
 
             # Notice / Important Guidance Card
             notice_card = ctk.CTkFrame(
@@ -8001,9 +8237,429 @@ class ModernApp(ctk.CTk):
                 text_color=ACCENT, font=(ui_font(), 11, 'bold'),
                 command=_activate_all).pack(anchor='w')
 
+        def render_watchlist_page(container):
+            for w in container.winfo_children():
+                w.destroy()
+
+            import watchlist
+
+            grp = ctk.CTkFrame(container, fg_color='transparent')
+            grp.pack(fill='both', expand=True, padx=(0, 18))
+
+            grp_hdr = ctk.CTkFrame(grp, fg_color='transparent')
+            grp_hdr.pack(fill='x', pady=(0, 4))
+
+            ctk.CTkLabel(
+                grp_hdr, text=T('watchlist_title'),
+                font=(ui_font(), 15, 'bold'),
+                text_color=TEXT_PRI
+            ).pack(side='left')
+
+            # Global Auto-download toggle switch (Off by default)
+            self._wl_autodownload_var = ctk.BooleanVar(value=config.get_watchlist_auto_download())
+
+            def _on_global_autodl_toggle():
+                val = bool(self._wl_autodownload_var.get())
+                config.set_watchlist_auto_download(val)
+
+            wl_autodl_switch = ctk.CTkSwitch(
+                grp_hdr,
+                text=T('watchlist_auto_download'),
+                variable=self._wl_autodownload_var,
+                command=_on_global_autodl_toggle,
+                font=(ui_font(), 11),
+                text_color=TEXT_SEC,
+                progress_color=ACCENT,
+            )
+            wl_autodl_switch.pack(side='right')
+
+            ctk.CTkLabel(
+                grp, text=T('watchlist_desc'),
+                text_color=TEXT_DIM, font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP,
+                justify='left', anchor='w'
+            ).pack(anchor='w', pady=(0, 10))
+
+            ctk.CTkFrame(grp, height=1, fg_color=BORDER).pack(fill='x', pady=(0, 12))
+
+            # ── Section 1: Search & Add with Typo / Fuzzy Recommendation ──
+            search_card = ctk.CTkFrame(
+                grp, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+                border_width=1, border_color=BORDER_CARD
+            )
+            search_card.pack(fill='x', pady=(0, 12))
+
+            search_inner = ctk.CTkFrame(search_card, fg_color='transparent')
+            search_inner.pack(fill='x', padx=14, pady=12)
+
+            search_row = ctk.CTkFrame(search_inner, fg_color='transparent')
+            search_row.pack(fill='x', pady=(0, 4))
+
+            type_map = {
+                T('watchlist_type_actress'): 'actress',
+                T('watchlist_type_studio'): 'studio',
+                T('watchlist_type_tag'): 'tag',
+            }
+            inv_type_map = {v: k for k, v in type_map.items()}
+
+            wl_type_var = ctk.StringVar(value=T('watchlist_type_actress'))
+            wl_type_menu = ctk.CTkOptionMenu(
+                search_row,
+                values=list(type_map.keys()),
+                variable=wl_type_var,
+                width=110, height=34, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_INPUT, button_color=BG_INPUT,
+                button_hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                dropdown_fg_color=BG_CARD, dropdown_hover_color=ACCENT,
+                dropdown_text_color=WHITE, dynamic_resizing=False,
+                font=(ui_font(), 10, 'bold'), dropdown_font=(ui_font(), 10)
+            )
+            wl_type_menu.pack(side='left', padx=(0, 8))
+
+            wl_entry = ctk.CTkEntry(
+                search_row,
+                placeholder_text=T('watchlist_search_placeholder'),
+                placeholder_text_color=('#B0AAA5', '#585350'),
+                height=34, corner_radius=CONTROL_RADIUS,
+                fg_color=BG_INPUT, border_color=BORDER, border_width=1,
+                text_color=TEXT_PRI, font=(ui_font(), 11)
+            )
+            wl_entry.pack(side='left', fill='x', expand=True, padx=(0, 8))
+
+            recom_box = ctk.CTkFrame(search_inner, fg_color='transparent')
+            recom_box.pack(fill='x', pady=(4, 0))
+
+            def _show_recommendations(txt):
+                for w in recom_box.winfo_children():
+                    w.destroy()
+                if not txt or len(txt.strip()) < 2:
+                    return
+                recoms = watchlist.fuzzy_search_recommendations(txt, limit=4)
+                if not recoms:
+                    return
+                lbl_recom = ctk.CTkLabel(
+                    recom_box, text=T('watchlist_did_you_mean'),
+                    font=(ui_font(), 10, 'bold'), text_color=TEXT_SEC
+                )
+                lbl_recom.pack(side='left', padx=(0, 6))
+                for rec in recoms:
+                    r_name = rec['name']
+                    r_type = rec.get('type', 'actress')
+                    r_lbl_type = inv_type_map.get(r_type, r_type)
+                    is_added = config.is_in_watchlist(r_name, r_type)
+                    btn_text = f"{r_name} ({r_lbl_type}) {'⭐' if is_added else '+⭐'}"
+                    chip_btn = ctk.CTkButton(
+                        recom_box, text=btn_text,
+                        height=24, corner_radius=12,
+                        fg_color=ACCENT_DIM if is_added else 'transparent',
+                        border_width=1, border_color=ACCENT if is_added else BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER,
+                        text_color=ACCENT if is_added else TEXT_PRI,
+                        font=(ui_font(), 9, 'bold'),
+                        command=lambda n=r_name, t=r_type: _add_recom_item(n, t)
+                    )
+                    chip_btn.pack(side='left', padx=(0, 6))
+
+            def _add_recom_item(name, itype):
+                config.toggle_watchlist_item(name, itype)
+                render_watchlist_page(container)
+
+            def _on_entry_change(event=None):
+                _show_recommendations(wl_entry.get())
+
+            wl_entry.bind('<KeyRelease>', _on_entry_change)
+
+            def _on_add_click():
+                txt = wl_entry.get().strip()
+                if not txt:
+                    return
+                sel_type = type_map.get(wl_type_var.get(), 'actress')
+                config.add_watchlist_item({
+                    'name': txt,
+                    'type': sel_type,
+                    'site': 'All',
+                    'auto_download': config.get_watchlist_auto_download()
+                })
+                wl_entry.delete(0, 'end')
+                render_watchlist_page(container)
+
+            wl_entry.bind('<Return>', lambda e: _on_add_click())
+
+            add_btn = ctk.CTkButton(
+                search_row, text='+ ' + T('watchlist_add_btn'),
+                width=90, height=34, corner_radius=CONTROL_RADIUS,
+                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                text_color=WHITE, font=(ui_font(), 10, 'bold'),
+                command=_on_add_click
+            )
+            add_btn.pack(side='left')
+
+            # ── Section 2: Popular on JAV.guru (Actresses & Studios) ──
+            pop_card = ctk.CTkFrame(
+                grp, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+                border_width=1, border_color=BORDER_CARD
+            )
+            pop_card.pack(fill='x', pady=(0, 14))
+
+            pop_inner = ctk.CTkFrame(pop_card, fg_color='transparent')
+            pop_inner.pack(fill='x', padx=14, pady=12)
+
+            pop_hdr = ctk.CTkFrame(pop_inner, fg_color='transparent')
+            pop_hdr.pack(fill='x', pady=(0, 8))
+
+            ctk.CTkLabel(
+                pop_hdr, text=T('watchlist_popular_title'),
+                font=(ui_font(), 12, 'bold'), text_color=TEXT_PRI
+            ).pack(side='left')
+
+            pop_tab_var = ctk.StringVar(value='actresses')
+            pop_grid_frame = ctk.CTkFrame(pop_inner, fg_color='transparent')
+
+            def _render_popular_grid():
+                for w in pop_grid_frame.winfo_children():
+                    w.destroy()
+                tab_mode = pop_tab_var.get()
+                if tab_mode == 'actresses':
+                    items = watchlist.fetch_popular_actresses_from_javguru()
+                    item_type = 'actress'
+                else:
+                    items = watchlist.fetch_popular_studios_from_javguru()
+                    item_type = 'studio'
+
+                row_f = None
+                for idx, it in enumerate(items[:21]):
+                    if idx % 3 == 0:
+                        row_f = ctk.CTkFrame(pop_grid_frame, fg_color='transparent')
+                        row_f.pack(fill='x', pady=2)
+                    name = it.get('name', '')
+                    count = it.get('count', '')
+                    is_watched = config.is_in_watchlist(name, item_type)
+
+                    btn_box = ctk.CTkFrame(
+                        row_f, fg_color=BG_INPUT if not is_watched else ACCENT_DIM,
+                        corner_radius=8, border_width=1,
+                        border_color=ACCENT if is_watched else BORDER
+                    )
+                    btn_box.pack(side='left', fill='x', expand=True, padx=3, pady=2)
+
+                    b_inner = ctk.CTkFrame(btn_box, fg_color='transparent')
+                    b_inner.pack(fill='x', padx=8, pady=6)
+
+                    lbl_text = f"{name}"
+                    if count:
+                        lbl_text += f" ({count})"
+
+                    ctk.CTkLabel(
+                        b_inner, text=lbl_text,
+                        font=(ui_font(), 10, 'bold' if is_watched else 'normal'),
+                        text_color=ACCENT if is_watched else TEXT_PRI,
+                        anchor='w'
+                    ).pack(side='left', fill='x', expand=True)
+
+                    def _make_pop_toggle(n=name, t=item_type):
+                        def _toggle():
+                            config.toggle_watchlist_item(n, t)
+                            _render_popular_grid()
+                            _refresh_tracked_list()
+                        return _toggle
+
+                    star_btn = ctk.CTkButton(
+                        b_inner, text='⭐' if is_watched else '+ ⭐',
+                        width=36, height=22, corner_radius=6,
+                        fg_color=ACCENT if is_watched else 'transparent',
+                        border_width=0 if is_watched else 1,
+                        border_color=BORDER_HOVER,
+                        hover_color=ACCENT_HOVER if is_watched else BG_CARD_HOVER,
+                        text_color=WHITE if is_watched else TEXT_SEC,
+                        font=(ui_font(), 9, 'bold'),
+                        command=_make_pop_toggle(name, item_type)
+                    )
+                    star_btn.pack(side='right', padx=(4, 0))
+
+            def _show_pop_actresses():
+                pop_tab_var.set('actresses')
+                act_btn.configure(fg_color=ACCENT, text_color=WHITE)
+                stu_btn.configure(fg_color='transparent', text_color=TEXT_SEC)
+                _render_popular_grid()
+
+            def _show_pop_studios():
+                pop_tab_var.set('studios')
+                stu_btn.configure(fg_color=ACCENT, text_color=WHITE)
+                act_btn.configure(fg_color='transparent', text_color=TEXT_SEC)
+                _render_popular_grid()
+
+            pop_tabs = ctk.CTkFrame(pop_hdr, fg_color='transparent')
+            pop_tabs.pack(side='right')
+
+            act_btn = ctk.CTkButton(
+                pop_tabs, text=T('watchlist_popular_actresses'),
+                height=26, corner_radius=13,
+                fg_color=ACCENT, hover_color=ACCENT_HOVER,
+                text_color=WHITE, font=(ui_font(), 10, 'bold'),
+                command=_show_pop_actresses
+            )
+            act_btn.pack(side='left', padx=(0, 4))
+
+            stu_btn = ctk.CTkButton(
+                pop_tabs, text=T('watchlist_popular_studios'),
+                height=26, corner_radius=13,
+                fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+                hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                font=(ui_font(), 10),
+                command=_show_pop_studios
+            )
+            stu_btn.pack(side='left')
+
+            pop_grid_frame.pack(fill='x')
+            _render_popular_grid()
+
+            # ── Section 3: Tracked Watchlist Items List ──
+            tracked_hdr = ctk.CTkFrame(grp, fg_color='transparent')
+            tracked_hdr.pack(fill='x', pady=(6, 8))
+
+            ctk.CTkLabel(
+                tracked_hdr, text=T('watchlist'),
+                font=(ui_font(), 14, 'bold'), text_color=TEXT_PRI
+            ).pack(side='left')
+
+            tracked_count_lbl = ctk.CTkLabel(
+                tracked_hdr, text='', font=(ui_font(), 11), text_color=TEXT_SEC
+            )
+            tracked_count_lbl.pack(side='left', padx=(8, 0))
+
+            tracked_list_frame = ctk.CTkFrame(grp, fg_color='transparent')
+            tracked_list_frame.pack(fill='both', expand=True)
+
+            def _refresh_tracked_list():
+                for w in tracked_list_frame.winfo_children():
+                    w.destroy()
+
+                items = config.get_watchlist()
+                count = len(items)
+                tracked_count_lbl.configure(text=T('watchlist_item_count', n=count))
+
+                if not items:
+                    empty_box = ctk.CTkFrame(
+                        tracked_list_frame, fg_color=BG_CARD,
+                        corner_radius=CARD_RADIUS, border_width=1, border_color=BORDER_CARD
+                    )
+                    empty_box.pack(fill='x', pady=8)
+                    ctk.CTkLabel(
+                        empty_box, text=T('watchlist_empty_msg'),
+                        font=(ui_font(), 11), text_color=TEXT_SEC, justify='center'
+                    ).pack(pady=20)
+                    return
+
+                badge_colors = {
+                    'actress': ('#FDE8EC', '#3F1F26', '#E11D48'),
+                    'studio': ('#EBF5FF', '#1E3A8A', '#2563EB'),
+                    'tag': ('#ECFDF5', '#064E3B', '#059669'),
+                    'keyword': ('#F3F4F6', '#374151', '#6B7280'),
+                }
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    name = item.get('name', '')
+                    itype = item.get('type', 'actress')
+                    auto_dl = item.get('auto_download', False)
+                    type_display = inv_type_map.get(itype, itype.capitalize())
+
+                    card = ctk.CTkFrame(
+                        tracked_list_frame, fg_color=BG_CARD,
+                        corner_radius=CARD_RADIUS, border_width=1,
+                        border_color=BORDER_CARD
+                    )
+                    card.pack(fill='x', pady=3)
+
+                    card_inner = ctk.CTkFrame(card, fg_color='transparent')
+                    card_inner.pack(fill='x', padx=12, pady=8)
+
+                    left_box = ctk.CTkFrame(card_inner, fg_color='transparent')
+                    left_box.pack(side='left', fill='x', expand=True)
+
+                    b_light, b_dark, b_text = badge_colors.get(itype, badge_colors['actress'])
+                    badge = ctk.CTkLabel(
+                        left_box, text=f" {type_display} ",
+                        font=(ui_font(), 9, 'bold'),
+                        text_color=b_text, fg_color=(b_light, b_dark),
+                        corner_radius=4
+                    )
+                    badge.pack(side='left', padx=(0, 8))
+
+                    name_lbl = ctk.CTkLabel(
+                        left_box, text=name,
+                        font=(ui_font(), 12, 'bold'), text_color=TEXT_PRI,
+                        anchor='w'
+                    )
+                    name_lbl.pack(side='left', padx=(0, 8))
+                    try:
+                        name_lbl.configure(cursor='hand2')
+                    except Exception:
+                        pass
+
+                    def _browse_entity(n=name, k=itype):
+                        self._select_tab('browse')
+                        self._open_entity_page(k, n)
+
+                    name_lbl.bind('<Button-1>', lambda e, n=name, k=itype: _browse_entity(n, k))
+                    name_lbl.bind('<Enter>', lambda e, w=name_lbl: w.configure(text_color=ACCENT))
+                    name_lbl.bind('<Leave>', lambda e, w=name_lbl: w.configure(text_color=TEXT_PRI))
+
+                    right_box = ctk.CTkFrame(card_inner, fg_color='transparent')
+                    right_box.pack(side='right')
+
+                    def _make_item_autodl(n=name, t=itype):
+                        def _toggle_adl():
+                            all_wl = config.get_watchlist()
+                            for w_it in all_wl:
+                                if isinstance(w_it, dict) and w_it.get('name', '').lower() == n.lower() and w_it.get('type') == t:
+                                    w_it['auto_download'] = not w_it.get('auto_download', False)
+                                    config.set_watchlist(all_wl)
+                                    break
+                        return _toggle_adl
+
+                    item_adl_var = ctk.BooleanVar(value=auto_dl)
+                    item_adl_sw = ctk.CTkSwitch(
+                        right_box, text='Auto DL',
+                        variable=item_adl_var,
+                        command=_make_item_autodl(name, itype),
+                        font=(ui_font(), 10), text_color=TEXT_SEC,
+                        progress_color=ACCENT, width=65
+                    )
+                    item_adl_sw.pack(side='left', padx=(0, 10))
+
+                    browse_btn = ctk.CTkButton(
+                        right_box, text=T('watchlist_browse_videos'),
+                        height=28, width=95, corner_radius=CONTROL_RADIUS,
+                        fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER, text_color=TEXT_PRI,
+                        font=(ui_font(), 10),
+                        command=lambda n=name, k=itype: _browse_entity(n, k)
+                    )
+                    browse_btn.pack(side='left', padx=(0, 6))
+
+                    def _remove_this_item(n=name, t=itype):
+                        config.remove_watchlist_item(n, t)
+                        _refresh_tracked_list()
+                        _render_popular_grid()
+
+                    del_btn = ctk.CTkButton(
+                        right_box, text='✕',
+                        height=28, width=32, corner_radius=CONTROL_RADIUS,
+                        fg_color='transparent', border_width=1, border_color=BORDER_HOVER,
+                        hover_color=BG_CARD_HOVER, text_color=TEXT_SEC,
+                        font=(ui_font(), 10, 'bold'),
+                        command=lambda n=name, t=itype: _remove_this_item(n, t)
+                    )
+                    del_btn.pack(side='left')
+
+            _refresh_tracked_list()
+
         self._settings_page_renderers = {
             'update': render_update_page,
             'general': render_general_page,
+            'watchlist': render_watchlist_page,
             'sources': render_sources_page,
             'saved': render_saved_page,
             'history': render_history_page,
@@ -8019,6 +8675,7 @@ class ModernApp(ctk.CTk):
         self._settings_categories = [
             ('update', '', T('update_settings_title') if 'update_settings_title' in T.__code__.co_varnames else 'Update'),
             ('general', '', T('general_settings_title') if 'general_settings_title' in T.__code__.co_varnames else 'General'),
+            ('watchlist', '', T('watchlist_title') if 'watchlist_title' in T.__code__.co_varnames else 'Watchlist'),
             ('sources', '', 'Sources'),
             ('saved', '', T('saved_settings_title') if 'saved_settings_title' in T.__code__.co_varnames else 'Saved'),
             ('history', '', T('history_settings_title')),
@@ -9879,6 +10536,7 @@ class ModernApp(ctk.CTk):
         return self._site_search_url(name)
 
     def _show_page_heading(self, kind, name):
+        self._current_page_entity = {'kind': kind, 'name': name}
         hdr = getattr(self, '_page_heading', None)
         if hdr is None:
             return
@@ -9886,8 +10544,11 @@ class ModernApp(ctk.CTk):
         text = f'{prefix}: {name}' if prefix else name
         self._entity_heading_base_text = text
         self._refresh_entity_heading()
+        self._refresh_page_heading_star()
         try:
             self._page_heading_close.pack(side='left', padx=12, pady=6)
+            self._page_heading_star.pack(side='left', padx=(0, 8), pady=6)
+            self._page_heading_refresh.pack(side='left', padx=(0, 8), pady=6)
         except Exception:
             pass
         try:
@@ -9898,8 +10559,54 @@ class ModernApp(ctk.CTk):
             except Exception:
                 pass
 
+    def _refresh_current_page(self):
+        """Reload the current entity, search results, or browse grid page to fetch latest uploaded videos."""
+        self._load_page()
+        if hasattr(self, '_status_lbl') and self._status_lbl:
+            self._status_lbl.configure(text=T('loading_browse'))
+
+    def _refresh_page_heading_star(self):
+        star_btn = getattr(self, '_page_heading_star', None)
+        if not star_btn:
+            return
+        entity = getattr(self, '_current_page_entity', None)
+        if not entity or not entity.get('name'):
+            star_btn.pack_forget()
+            return
+        name = entity['name']
+        kind = entity.get('kind', 'actress')
+        is_watched = config.is_in_watchlist(name, kind)
+        if is_watched:
+            star_btn.configure(
+                text='⭐', text_color='#F59E0B',
+                border_color='#F59E0B', fg_color=BG_CARD_HOVER
+            )
+            ToolTip(star_btn, lambda: T('watchlist_star_tip_remove'))
+        else:
+            star_btn.configure(
+                text='☆', text_color=TEXT_SEC,
+                border_color=BORDER_HOVER, fg_color='transparent'
+            )
+            ToolTip(star_btn, lambda: T('watchlist_star_tip_add'))
+
+    def _toggle_current_entity_watchlist(self):
+        entity = getattr(self, '_current_page_entity', None)
+        if not entity or not entity.get('name'):
+            return
+        name = entity['name']
+        kind = entity.get('kind', 'actress')
+        is_now_watched = config.toggle_watchlist_item(name, kind)
+        self._refresh_page_heading_star()
+        if is_now_watched:
+            msg = T('watchlist_added_toast', name=name)
+        else:
+            msg = T('watchlist_removed_toast', name=name)
+        if hasattr(self, '_status_lbl') and self._status_lbl:
+            self._status_lbl.configure(text=msg)
+
     def _show_search_all_heading(self, query):
         """Banner above the merged Search From All results."""
+        self._current_page_entity = None
         hdr = getattr(self, '_page_heading', None)
         if hdr is None:
             return
@@ -9907,6 +10614,8 @@ class ModernApp(ctk.CTk):
         self._refresh_entity_heading()
         try:
             self._page_heading_close.pack_forget()
+            self._page_heading_star.pack_forget()
+            self._page_heading_refresh.pack(side='left', padx=12, pady=6)
         except Exception:
             pass
         try:
@@ -10578,6 +11287,96 @@ class ModernApp(ctk.CTk):
         quality = config.set_recognition_quality(quality)
         self._recognition_quality_var.set(
             self._recognition_quality_label(quality))
+
+    def _on_video_ocr_toggle(self):
+        enabled = bool(self._video_ocr_enabled_var.get())
+        config.set_video_ocr_enabled(enabled)
+
+    def _on_video_ocr_lang_change(self, val):
+        lang = self._video_ocr_lang_from_label(val)
+        config.set_video_ocr_lang(lang)
+
+    def _on_video_ocr_backend_change(self, val):
+        backend = self._video_ocr_backend_from_label(val)
+        config.set_video_ocr_backend(backend)
+
+    def _on_video_ocr_automode_change(self, val):
+        mode = self._video_ocr_automode_from_label(val)
+        config.set_video_ocr_auto_mode(mode)
+
+    def _extract_video_ocr_dialog(self):
+        from tkinter import filedialog, messagebox
+        file_path = filedialog.askopenfilename(
+            parent=self,
+            title=T('video_ocr_extract_title'),
+            filetypes=[
+                ("Video files", "*.mp4;*.mkv;*.ts;*.avi;*.mov;*.flv;*.webm"),
+                ("All files", "*.*"),
+            ]
+        )
+        if not file_path or not os.path.exists(file_path):
+            return
+
+        lang = config.get_video_ocr_lang()
+        backend = config.get_video_ocr_backend()
+        base, _ = os.path.splitext(file_path)
+        out_srt = f"{base}.zh-TW.srt" if 'zh' in lang else f"{base}.srt"
+
+        if hasattr(self, '_video_ocr_extract_status'):
+            self._video_ocr_extract_status.configure(
+                text=T('video_ocr_running'), text_color=ACCENT)
+        if hasattr(self, '_video_ocr_extract_btn'):
+            self._video_ocr_extract_btn.configure(state='disabled')
+
+        def _worker():
+            try:
+                import video_ocr
+                extractor = video_ocr.VideoOCRExtractor(backend=backend)
+                def _prog(pct, msg):
+                    if hasattr(self, '_video_ocr_extract_status'):
+                        self.after(0, lambda: self._video_ocr_extract_status.configure(
+                            text=f"{int(pct)}% - {msg}", text_color=TEXT_SEC))
+
+                ok = extractor.extract_from_video(
+                    video_path=file_path,
+                    output_srt_path=out_srt,
+                    lang=lang,
+                    progress_cb=_prog,
+                    cancel_check=lambda: getattr(self, '_is_closing', False)
+                )
+                if ok and os.path.exists(out_srt):
+                    def _on_done():
+                        if hasattr(self, '_video_ocr_extract_status'):
+                            self._video_ocr_extract_status.configure(
+                                text=f"{T('video_ocr_success')} ({os.path.basename(out_srt)})",
+                                text_color=SUCCESS)
+                        if hasattr(self, '_video_ocr_extract_btn'):
+                            self._video_ocr_extract_btn.configure(state='normal')
+                        messagebox.showinfo(
+                            T('video_ocr_card_title'),
+                            f"{T('video_ocr_success')}\n\n{out_srt}",
+                            parent=self
+                        )
+                    self.after(0, _on_done)
+                else:
+                    def _on_fail():
+                        if hasattr(self, '_video_ocr_extract_status'):
+                            self._video_ocr_extract_status.configure(
+                                text=T('video_ocr_failed'), text_color=WARNING)
+                        if hasattr(self, '_video_ocr_extract_btn'):
+                            self._video_ocr_extract_btn.configure(state='normal')
+                    self.after(0, _on_fail)
+            except Exception as e:
+                def _on_err():
+                    if hasattr(self, '_video_ocr_extract_status'):
+                        self._video_ocr_extract_status.configure(
+                            text=f"{T('video_ocr_failed')}: {e}", text_color=WARNING)
+                    if hasattr(self, '_video_ocr_extract_btn'):
+                        self._video_ocr_extract_btn.configure(state='normal')
+                self.after(0, _on_err)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
 
     def _prefetch_subtitle_models(self):
         if getattr(self, '_subtitle_prefetching', False):

@@ -984,3 +984,216 @@ def remove_download_history(url):
     except Exception:
         pass
 
+
+def get_watchlist():
+    try:
+        with _prefs_lock:
+            items = _load_prefs().get('watchlist', [])
+            return list(items) if isinstance(items, list) else []
+    except Exception:
+        return []
+
+
+def set_watchlist(items):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['watchlist'] = list(items) if isinstance(items, list) else []
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def add_watchlist_item(item):
+    if not isinstance(item, dict):
+        return False
+    name = (item.get('name') or '').strip()
+    if not name:
+        return False
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            wl = prefs.get('watchlist', [])
+            if not isinstance(wl, list):
+                wl = []
+            # Avoid duplicate names under same type
+            item_type = item.get('type', 'actress')
+            for existing in wl:
+                if isinstance(existing, dict) and existing.get('name', '').lower() == name.lower() and existing.get('type') == item_type:
+                    return False
+            wl.append(item)
+            prefs['watchlist'] = wl
+            _save_prefs(prefs)
+            return True
+    except Exception:
+        return False
+
+
+def remove_watchlist_item(name, item_type=None):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            wl = prefs.get('watchlist', [])
+            if not isinstance(wl, list):
+                return False
+            filtered = []
+            removed = False
+            for item in wl:
+                if isinstance(item, dict):
+                    match_name = item.get('name', '').lower() == str(name).lower()
+                    match_type = True if item_type is None else item.get('type') == item_type
+                    if match_name and match_type:
+                        removed = True
+                        continue
+                filtered.append(item)
+            if removed:
+                prefs['watchlist'] = filtered
+                _save_prefs(prefs)
+            return removed
+    except Exception:
+        return False
+
+
+def is_in_watchlist(name: str, item_type: Optional[str] = None) -> bool:
+    if not name:
+        return False
+    try:
+        with _prefs_lock:
+            wl = _load_prefs().get('watchlist', [])
+            if not isinstance(wl, list):
+                return False
+            name_clean = str(name).strip().lower()
+            for it in wl:
+                if isinstance(it, dict) and it.get('name', '').strip().lower() == name_clean:
+                    if item_type is None or it.get('type') == item_type:
+                        return True
+            return False
+    except Exception:
+        return False
+
+
+def toggle_watchlist_item(name: str, item_type: str = 'actress', site: str = 'All') -> bool:
+    """Toggles item in watchlist. Returns True if now in watchlist, False if removed."""
+    if not name:
+        return False
+    if is_in_watchlist(name, item_type):
+        remove_watchlist_item(name, item_type)
+        return False
+    else:
+        add_watchlist_item({
+            'name': name.strip(),
+            'type': item_type,
+            'site': site,
+            'auto_download': get_watchlist_auto_download()
+        })
+        return True
+
+
+def get_watchlist_auto_download() -> bool:
+    try:
+        with _prefs_lock:
+            return bool(_load_prefs().get('watchlist_auto_download', False))
+    except Exception:
+        return False
+
+
+def set_watchlist_auto_download(enabled: bool):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['watchlist_auto_download'] = bool(enabled)
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+VALID_VIDEO_OCR_LANGS = {'zh', 'en', 'ja', 'auto'}
+VALID_VIDEO_OCR_BACKENDS = {'auto', 'rapidocr', 'win_native', 'easyocr', 'pytesseract'}
+VALID_VIDEO_OCR_MODES = {'on_hardcoded_detected', 'always', 'manual_only'}
+
+
+def get_video_ocr_enabled() -> bool:
+    try:
+        with _prefs_lock:
+            return bool(_load_prefs().get('video_ocr_enabled', True))
+    except Exception:
+        return True
+
+
+def set_video_ocr_enabled(enabled: bool):
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['video_ocr_enabled'] = bool(enabled)
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def get_video_ocr_lang() -> str:
+    try:
+        with _prefs_lock:
+            lang = str(_load_prefs().get('video_ocr_lang', 'zh')).strip().lower()
+            return lang if lang in VALID_VIDEO_OCR_LANGS else 'zh'
+    except Exception:
+        return 'zh'
+
+
+def set_video_ocr_lang(lang: str):
+    lang = str(lang or 'zh').strip().lower()
+    if lang not in VALID_VIDEO_OCR_LANGS:
+        lang = 'zh'
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['video_ocr_lang'] = lang
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def get_video_ocr_backend() -> str:
+    try:
+        with _prefs_lock:
+            backend = str(_load_prefs().get('video_ocr_backend', 'auto')).strip().lower()
+            return backend if backend in VALID_VIDEO_OCR_BACKENDS else 'auto'
+    except Exception:
+        return 'auto'
+
+
+def set_video_ocr_backend(backend: str):
+    backend = str(backend or 'auto').strip().lower()
+    if backend not in VALID_VIDEO_OCR_BACKENDS:
+        backend = 'auto'
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['video_ocr_backend'] = backend
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+def get_video_ocr_auto_mode() -> str:
+    try:
+        with _prefs_lock:
+            mode = str(_load_prefs().get('video_ocr_auto_mode', 'on_hardcoded_detected')).strip().lower()
+            return mode if mode in VALID_VIDEO_OCR_MODES else 'on_hardcoded_detected'
+    except Exception:
+        return 'on_hardcoded_detected'
+
+
+def set_video_ocr_auto_mode(mode: str):
+    mode = str(mode or 'on_hardcoded_detected').strip().lower()
+    if mode not in VALID_VIDEO_OCR_MODES:
+        mode = 'on_hardcoded_detected'
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['video_ocr_auto_mode'] = mode
+            _save_prefs(prefs)
+    except Exception:
+        pass
+
+
+

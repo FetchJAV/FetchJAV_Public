@@ -77,3 +77,26 @@ def test_crawler_source_subtitle_evidence_is_bound_to_its_source_site():
         ('jable-category-chinese-subtitle',))
     assert crawler.source_subtitle_evidence() == (
         'jable-category-chinese-subtitle',)
+
+
+def test_prepare_crawl_reports_resumed_progress(tmp_path):
+    crawler = object.__new__(M3U8Crawler)
+    crawler._temp_folder = str(tmp_path)
+    crawler._tsList = [f'https://example.test/seg_{i}.ts' for i in range(10)]
+
+    # Simulate 6 segments already downloaded on disk
+    for i in range(6):
+        seg_file = tmp_path / f"{i:06d}.mp4"
+        seg_file.write_bytes(b'TS_DATA_1234')
+
+    progress_reports = []
+    crawler._progress_callback = lambda done, total, speed: progress_reports.append((done, total, speed))
+    crawler._startCrawl = lambda: None  # Mock start crawl
+
+    M3U8Crawler._prepareCrawl(crawler)
+
+    # Must find 4 pending segments out of 10
+    assert len(crawler._pending_set) == 4
+    # Initial progress report must show 6/10 completed (60%), not 0%
+    assert progress_reports == [(6, 10, 0)]
+
