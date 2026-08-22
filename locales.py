@@ -16,7 +16,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': 'Downloader', # Not used
-        'version_label': 'v0.1.5',
+        'version_label': 'v0.1.6',
         'by_author': '',
         'status_ready': '就緒',
         'site_label': '網站',
@@ -63,6 +63,11 @@ STRINGS = {
         'tab_browse': '瀏覽',
         'tab_download': '下載',
         'tab_settings': '設定',
+        'watchlist': '追蹤清單',
+        'watchlist_title': '女優與片商追蹤清單',
+        'watchlist_follow': '追蹤',
+        'watchlist_following': '已追蹤',
+        'watchlist_auto_download': '發現新片時自動下載',
 
         # Browse tab
         'browse_category': '瀏覽選片',
@@ -488,7 +493,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': 'Downloader', # Not used
-        'version_label': 'v0.1.5',
+        'version_label': 'v0.1.6',
         'by_author': '',
         'status_ready': 'Ready',
         'site_label': 'Site',
@@ -536,6 +541,11 @@ STRINGS = {
         'tab_browse': 'Browse',
         'tab_download': 'Download',
         'tab_settings': 'Settings',
+        'watchlist': 'Watchlist',
+        'watchlist_title': 'Actress & Studio Watchlist',
+        'watchlist_follow': 'Watch',
+        'watchlist_following': 'Watching',
+        'watchlist_auto_download': 'Auto-download new releases',
 
         # Browse tab
         'browse_category': 'Browse Videos',
@@ -948,7 +958,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': '下载器', # Not used
-        'version_label': 'v0.1.5',
+        'version_label': 'v0.1.6',
         'by_author': '',
         'status_ready': '就绪',
         'site_label': '网站',
@@ -995,6 +1005,11 @@ STRINGS = {
         'tab_browse': '浏览',
         'tab_download': '下载',
         'tab_settings': '设置',
+        'watchlist': '关注清单',
+        'watchlist_title': '女优与片商关注清单',
+        'watchlist_follow': '关注',
+        'watchlist_following': '已关注',
+        'watchlist_auto_download': '发现新片时自动下载',
 
         # Browse tab
         'browse_category': '浏览视频',
@@ -1407,7 +1422,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': 'ダウンローダー', # Not used
-        'version_label': 'v0.1.5',
+        'version_label': 'v0.1.6',
         'by_author': '',
         'status_ready': '準備完了',
         'site_label': 'サイト',
@@ -1455,6 +1470,11 @@ STRINGS = {
         'tab_browse': '閲覧',
         'tab_download': 'ダウンロード',
         'tab_settings': '設定',
+        'watchlist': 'ウォッチリスト',
+        'watchlist_title': '女優・メーカー ウォッチリスト',
+        'watchlist_follow': 'フォロー',
+        'watchlist_following': 'フォロー中',
+        'watchlist_auto_download': '新作を自動ダウンロード',
 
         # Browse tab
         'browse_category': '動画を閲覧',
