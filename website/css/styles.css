@@ -1475,3 +1475,48 @@ svg {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Version history section header ---------- */
+.ver-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+}
+
+.ver-section-head h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ver-sub {
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--charcoal);
+}
+
+.ver-section-head .btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Download card logo */
+.dl-logo {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border-radius: 14px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 620px) {
+  .ver-section-head h2 {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+}
