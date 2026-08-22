@@ -1503,15 +1503,6 @@ svg {
   height: 14px;
 }
 
-/* Download card logo */
-.dl-logo {
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  border-radius: 14px;
-  margin-bottom: 14px;
-}
-
 @media (max-width: 620px) {
   .ver-section-head {
     flex-direction: column;
