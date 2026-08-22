@@ -204,10 +204,35 @@ def test_modern_defers_initial_workers_until_mainloop():
     app._is_closing = False
     app._start_update_check = lambda **kwargs: calls.append(('update', kwargs))
     app._load_categories = lambda: calls.append(('categories', {}))
+    app._start_banner_fetch = lambda: calls.append(('banner', {}))
 
     app._start_initial_background_tasks()
 
-    assert calls == [('update', {'manual': False}), ('categories', {})]
+    assert calls == [('update', {'manual': False}), ('categories', {}),
+                     ('banner', {})]
+
+
+def test_banner_module_validates_and_caches():
+    import banner as banner_mod
+
+    manifest = {
+        'id': 'tg-promo-test',
+        'active': True,
+        'type': 'ad',
+        'title': 'Join Telegram',
+        'url': 'https://t.me/FetchJAV',
+        'start': '2000-01-01T00:00',
+        'end': '2099-01-01T00:00',
+    }
+    cleaned = banner_mod.validate_manifest(manifest)
+    assert cleaned is not None
+    assert cleaned['id'] == 'tg-promo-test'
+    assert banner_mod.validate_manifest({**manifest, 'active': False}) is None
+    assert banner_mod.validate_manifest(
+        {**manifest, 'end': '2000-01-01'}) is None
+
+    future = {**manifest, 'start': '2099-01-01'}
+    assert banner_mod.validate_manifest(future) is None
 
 
 def test_smalltool_balances_category_and_activity_regions():

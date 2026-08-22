@@ -182,6 +182,7 @@ from ui_theme import (
     browse_columns_for_width,
 )
 import analytics
+import banner
 
 APP_VERSION = '0.1.7'
 
@@ -1738,6 +1739,12 @@ class ModernApp(ctk.CTk):
         self._update_check_btn = None
         self._update_now_btn = None
 
+        # Remote announcement banner
+        self._banner_data = None
+        self._banner_frame = None
+        self._promo_banner_frame = None
+        self._browse_content = None
+
         # Background (close-to-tray) support
         self._tray_icon = None
         self._tray_available = False
@@ -1950,6 +1957,179 @@ class ModernApp(ctk.CTk):
             return
         self._start_update_check(manual=False)
         self._load_categories()
+        self._start_banner_fetch()
+
+    # ── Remote announcement banner ──────────────────────────────────
+    _BANNER_STYLES = {
+        'info':   {'bg': ('#E3EDFB', '#12203A'), 'fg': ('#1D4F9E', '#7EB2F0'),
+                   'hover': ('#D3E3F8', '#1A2C4E'), 'icon': '\u2139'},
+        'update': {'bg': SUCCESS_DIM,            'fg': SUCCESS,
+                   'hover': ('#D6E6DC', '#20352A'), 'icon': '\u2B07'},
+        'ad':     {'bg': ('#FBEEDC', '#33220E'), 'fg': ('#9A5B12', '#EFB35C'),
+                   'hover': ('#F5E2C4', '#453015'), 'icon': '\u2726'},
+    }
+
+    def _start_banner_fetch(self):
+        if self._is_closing or getattr(self, '_banner_worker_started', False):
+            return
+        self._banner_worker_started = True
+
+        def _worker():
+            while not self._is_closing:
+                try:
+                    data = banner.fetch_manifest(
+                        current_version=APP_VERSION)
+                except Exception:
+                    data = None
+
+                def _apply(d=data):
+                    if self._is_closing:
+                        return
+                    self._banner_data = d
+                    self._render_banner()
+
+                try:
+                    self._ui(_apply)
+                except Exception:
+                    return
+                waited = 0
+                while waited < 1800 and not self._is_closing:
+                    time.sleep(2)
+                    waited += 2
+
+        threading.Thread(target=_worker, daemon=True,
+                         name='BannerFetch').start()
+
+    def _destroy_banner_frames(self):
+        for attr in ('_banner_frame', '_promo_banner_frame'):
+            old = getattr(self, attr, None)
+            if old is not None:
+                try:
+                    old.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
+    def _render_banner(self):
+        self._destroy_banner_frames()
+
+        data = self._banner_data
+        if self._is_closing or not data or not self._browse_content:
+            return
+        bid = str(data.get('id') or '')
+        if bid in banner.dismissed_ids():
+            return
+
+        img_path = data.get('_image_path')
+        if img_path and os.path.exists(img_path) \
+                and getattr(self, '_grid_scroll', None) is not None:
+            self._render_image_banner(data, bid, img_path)
+            return
+
+        style = self._BANNER_STYLES.get(
+            data.get('type', 'info'), self._BANNER_STYLES['info'])
+        url = data.get('url') or ''
+
+        frame = ctk.CTkFrame(self._tab_frames['browse'], fg_color=style['bg'],
+                             corner_radius=0)
+        self._banner_frame = frame
+        inner = ctk.CTkFrame(frame, fg_color='transparent')
+        inner.pack(fill='x', padx=12, pady=5)
+
+        icon_lbl = ctk.CTkLabel(inner, text=style['icon'], width=22,
+                                text_color=style['fg'],
+                                font=(ui_font(), 12, 'bold'))
+        icon_lbl.pack(side='left')
+
+        title_lbl = ctk.CTkLabel(inner, text=data.get('title', ''),
+                                 text_color=style['fg'],
+                                 font=(ui_font(), 11, 'bold'))
+        title_lbl.pack(side='left', padx=(4, 8))
+
+        msg_txt = data.get('message', '')
+        msg_lbl = None
+        if msg_txt:
+            msg_lbl = ctk.CTkLabel(inner, text=msg_txt, text_color=TEXT_SEC,
+                                   font=(ui_font(), 11))
+            msg_lbl.pack(side='left', fill='x', expand=True)
+
+        def _open_link(e=None):
+            if url:
+                webbrowser.open(url)
+
+        if url:
+            for w in filter(None, (icon_lbl, title_lbl, msg_lbl)):
+                w.bind('<Button-1>', _open_link)
+                try:
+                    w.configure(cursor='hand2')
+                except Exception:
+                    pass
+
+        def _close():
+            banner.remember_dismissed(bid)
+            try:
+                frame.destroy()
+            except Exception:
+                pass
+            if self._banner_frame is frame:
+                self._banner_frame = None
+
+        close_btn = ctk.CTkButton(inner, text='\u2715', width=26, height=22,
+                                  corner_radius=4, fg_color='transparent',
+                                  border_width=0, hover_color=style['hover'],
+                                  text_color=style['fg'],
+                                  font=(ui_font(), 13, 'bold'),
+                                  command=_close)
+        close_btn.pack(side='right', padx=(6, 0))
+
+        frame.pack(fill='x', before=self._browse_content)
+
+    def _render_image_banner(self, data, bid, img_path):
+        frame = ctk.CTkFrame(self._browse_grid_area, fg_color=BG_CARD,
+                             corner_radius=0)
+        self._promo_banner_frame = frame
+
+        img_h = 120
+        try:
+            with Image.open(img_path) as pil_img:
+                ratio = pil_img.width / float(pil_img.height)
+            img_w = max(200, int(img_h * ratio))
+            photo = Image.open(img_path)
+            self._promo_banner_img = ctk.CTkImage(
+                light_image=photo, dark_image=photo, size=(img_w, img_h))
+        except Exception:
+            try:
+                frame.destroy()
+            except Exception:
+                pass
+            self._promo_banner_frame = None
+            return
+
+        url = data.get('url') or ''
+        lbl = ctk.CTkLabel(frame, image=self._promo_banner_img, text='',
+                           cursor='hand2' if url else None)
+        lbl.pack(fill='x')
+
+        if url:
+            lbl.bind('<Button-1>', lambda e: webbrowser.open(url))
+
+        def _close():
+            banner.remember_dismissed(bid)
+            try:
+                frame.destroy()
+            except Exception:
+                pass
+            if self._promo_banner_frame is frame:
+                self._promo_banner_frame = None
+
+        close_btn = ctk.CTkButton(
+            frame, text='\u2715', width=24, height=24, corner_radius=12,
+            fg_color=('#00000080', '#000000A0'), hover_color='#000000',
+            text_color='#FFFFFF', font=(ui_font(), 12, 'bold'),
+            command=_close)
+        close_btn.place(relx=1.0, x=-10, y=10, anchor='ne')
+
+        frame.pack(fill='x', before=self._grid_scroll)
 
     def _ask_language_first_run(self):
         popup = None
@@ -3423,6 +3603,7 @@ class ModernApp(ctk.CTk):
         # ── Content area: sidebar + grid ────────────────────────────
         content = ctk.CTkFrame(tab, fg_color=BG_DARK, corner_radius=0)
         content.pack(fill='both', expand=True)
+        self._browse_content = content
 
         # Sidebar
         self._sidebar = ctk.CTkScrollableFrame(
