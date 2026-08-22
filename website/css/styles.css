@@ -1140,7 +1140,6 @@ svg {
 
 .ver-item.ver-latest {
   background: var(--surface-elevated);
-  border-left: 3px solid var(--accent-green);
 }
 
 .ver-info {
