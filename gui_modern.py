@@ -183,7 +183,7 @@ from ui_theme import (
 )
 import analytics
 
-APP_VERSION = '0.1.5'
+APP_VERSION = '0.1.6'
 
 # issue #24: startup breadcrumbs — no-op if crashlog unavailable
 try:
@@ -1161,6 +1161,43 @@ def _make_circular_avatar(img: Image.Image, diameter: int) -> ctk.CTkImage:
         )
     except Exception:
         return _create_height_fitted_hd_ctk_image(img, diameter, diameter)
+
+
+def _make_initials_avatar(text: str, diameter: int = 32, bg_color=None) -> ctk.CTkImage:
+    """Generate a stylish circular avatar with initials."""
+    diameter = max(16, int(diameter))
+    img = Image.new('RGBA', (diameter, diameter), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    if not bg_color:
+        palette = [
+            (255, 75, 110), (139, 92, 246), (59, 130, 246), (16, 185, 129),
+            (245, 158, 11), (236, 72, 153), (99, 102, 241), (20, 184, 166)
+        ]
+        color_idx = sum(ord(c) for c in (text or 'A')) % len(palette)
+        bg_color = palette[color_idx]
+
+    draw.ellipse((0, 0, diameter - 1, diameter - 1), fill=bg_color)
+
+    clean_txt = (text or '?').strip()
+    words = clean_txt.split()
+    if len(words) >= 2:
+        initials = (words[0][0] + words[1][0]).upper()
+    else:
+        initials = clean_txt[:2].upper() if len(clean_txt) >= 2 else clean_txt[:1].upper()
+
+    try:
+        font = ImageFont.load_default()
+    except Exception:
+        font = None
+
+    bbox = draw.textbbox((0, 0), initials, font=font) if font and hasattr(draw, 'textbbox') else (0, 0, 10, 10)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    tx = (diameter - tw) / 2
+    ty = (diameter - th) / 2
+    draw.text((tx, ty), initials, fill=(255, 255, 255, 255), font=font)
+
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(diameter, diameter))
 
 
 def _get_thumb_session() -> requests.Session:
