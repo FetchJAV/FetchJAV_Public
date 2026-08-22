@@ -1,10 +1,11 @@
 {
-  "id": "welcome-0.1.5",
-  "active": false,
-  "type": "info",
-  "title": "Welcome to FetchJAV",
-  "message": "Example announcement. Set active=true to show this banner on every install.",
-  "url": "https://fetchjav.github.io/FetchJAV_Public/download.html",
-  "start": "2026-01-01",
-  "end": "2027-01-01"
+  "id": "tg-promo-20260822",
+  "active": true,
+  "type": "ad",
+  "title": "Join FetchJAV on Telegram",
+  "message": "Quick updates, release alerts and community support",
+  "url": "https://t.me/FetchJAV",
+  "image": "https://fetchjav.github.io/FetchJAV_Public/assets/promo_telegram.png",
+  "start": "2026-08-22T20:32",
+  "end": "2026-08-22T22:32"
 }
