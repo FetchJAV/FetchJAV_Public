@@ -1488,13 +1488,14 @@ svg {
 
 .doc .ver-section-head h2,
 .ver-section-head h2 {
-  margin: 0 0 2px;
+  margin: 0;
+  line-height: 1.2;
 }
 
 .ver-sub {
   font-size: 14px;
   color: var(--ash);
-  margin: 0;
+  margin: -2px 0 0;
   line-height: 1.4;
 }
 
