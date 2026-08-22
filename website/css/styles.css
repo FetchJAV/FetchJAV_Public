@@ -1481,19 +1481,21 @@ svg {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px 24px;
+  gap: 8px 24px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin: 8px 0 16px;
 }
 
+.doc .ver-section-head h2,
 .ver-section-head h2 {
-  margin-bottom: 4px;
+  margin: 0 0 2px;
 }
 
 .ver-sub {
-  font-size: 15px;
-  color: var(--charcoal);
+  font-size: 14px;
+  color: var(--ash);
   margin: 0;
+  line-height: 1.4;
 }
 
 .ver-section-head .btn svg {
