@@ -29,6 +29,7 @@ _event_queue: queue.Queue = queue.Queue(maxsize=1000)
 _worker_thread: Optional[threading.Thread] = None
 _client_id: Optional[str] = None
 _client_id_lock = threading.Lock()
+_session_id: Optional[int] = None
 _enabled = True
 
 
@@ -65,6 +66,14 @@ def get_client_id() -> str:
 
         _client_id = new_cid
         return _client_id
+
+
+def get_session_id() -> int:
+    """Return a stable per-run analytics session id (epoch seconds of app start)."""
+    global _session_id
+    if _session_id is None:
+        _session_id = int(time.time())
+    return _session_id
 
 
 def is_enabled() -> bool:
@@ -105,21 +114,28 @@ def _analytics_worker():
             event_name, params = item
             cid = get_client_id()
 
-            query_params = {
-                'v': '2',
-                'tid': MEASUREMENT_ID,
-                'api_secret': API_SECRET,
-                'cid': cid,
-                'en': event_name,
-                '_p': str(int(time.time() * 1000)),
+            event_params: Dict[str, Any] = {
+                'engagement_time_msec': 100,
+                'session_id': get_session_id(),
             }
-
             for k, v in (params or {}).items():
-                if v is not None:
-                    if isinstance(v, (int, float)):
-                        query_params[f'epn.{k}'] = str(v)
-                    else:
-                        query_params[f'ep.{k}'] = str(v)[:100]
+                if v is None:
+                    continue
+                name = str(k)[:40]
+                if isinstance(v, bool):
+                    event_params[name] = int(v)
+                elif isinstance(v, (int, float)):
+                    event_params[name] = v
+                else:
+                    event_params[name] = str(v)[:100]
+
+            payload = {
+                'client_id': cid,
+                'events': [{
+                    'name': str(event_name)[:40],
+                    'params': event_params,
+                }],
+            }
 
             proxy_kwargs = {}
             try:
@@ -129,7 +145,11 @@ def _analytics_worker():
 
             session.post(
                 COLLECT_ENDPOINT,
-                params=query_params,
+                params={
+                    'measurement_id': MEASUREMENT_ID,
+                    'api_secret': API_SECRET,
+                },
+                json=payload,
                 timeout=4,
                 **proxy_kwargs
             )
