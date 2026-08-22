@@ -118,6 +118,16 @@ Configure destination folders, default resolution preferences (Highest, 1080p, 7
 
 ---
 
+### 10. Hardcoded Video OCR Subtitle Extractor
+Extract burnt-in subtitles directly from video frames into standard `.srt` subtitle tracks using RapidOCR, Windows Native OCR, and EasyOCR without requiring audio transcription.
+
+---
+
+### 11. Actress & Studio Watchlist with Desktop Notifications
+Follow your favorite AV idols, performers, and studios. FetchJAV automatically monitors new releases across supported sites with unread badge indicators, desktop toast notifications, and 1-click batch download queuing.
+
+---
+
 ## 🚀 Windows: Quick Start in 30 Seconds
 
 1. **Download**: Get the latest **[FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe)**.

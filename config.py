@@ -1177,16 +1177,16 @@ def set_video_ocr_backend(backend: str):
 def get_video_ocr_auto_mode() -> str:
     try:
         with _prefs_lock:
-            mode = str(_load_prefs().get('video_ocr_auto_mode', 'on_hardcoded_detected')).strip().lower()
-            return mode if mode in VALID_VIDEO_OCR_MODES else 'on_hardcoded_detected'
+            mode = str(_load_prefs().get('video_ocr_auto_mode', 'manual_only')).strip().lower()
+            return mode if mode in VALID_VIDEO_OCR_MODES else 'manual_only'
     except Exception:
-        return 'on_hardcoded_detected'
+        return 'manual_only'
 
 
 def set_video_ocr_auto_mode(mode: str):
-    mode = str(mode or 'on_hardcoded_detected').strip().lower()
+    mode = str(mode or 'manual_only').strip().lower()
     if mode not in VALID_VIDEO_OCR_MODES:
-        mode = 'on_hardcoded_detected'
+        mode = 'manual_only'
     try:
         with _prefs_lock:
             prefs = _load_prefs()

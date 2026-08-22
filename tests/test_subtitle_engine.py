@@ -30,6 +30,7 @@ def test_trusted_source_chinese_satisfies_zh_before_any_pipeline_or_write(
         monkeypatch, tmp_path):
     video = tmp_path / 'movie.mp4'
     video.write_bytes(b'video')
+    monkeypatch.setattr(config, 'get_video_ocr_enabled', lambda: False)
     forbidden = (
         'recognition_profile',
         '_media_identity',
@@ -39,6 +40,7 @@ def test_trusted_source_chinese_satisfies_zh_before_any_pipeline_or_write(
         '_run_recognition',
         'translate_srt_to_zh_tw',
         '_atomic_write_text',
+        'generate_subtitles_via_ocr',
     )
     for name in forbidden:
         monkeypatch.setattr(

@@ -98,6 +98,9 @@ FetchJAV is a feature-rich Python desktop application for downloading, streaming
 | **Multi-language** | Full i18n in English, Traditional Chinese, Simplified Chinese, and Japanese |
 | **Clip Import** | Clipboard monitoring auto-detects valid URLs; `.txt`/`.csv` batch import |
 | **Online Subtitle Providers** | Integration with OpenSubtitles, Podnapisi, SubDL, SubtitleCat, YTS Subtitles |
+| **Hardcoded Video OCR** | Extract burnt-in subtitles directly from video frames into standard `.srt` subtitles using RapidOCR, Windows Native OCR, and EasyOCR |
+| **Actress & Studio Watchlist** | Follow favorite performers and studios with background release checks, desktop notifications, unread badges, and 1-click batch queueing |
+| **JAV.guru Discovery** | Native browsing, actress catalog, uncensored metadata, and high-speed downloading for JAV.guru |
 
 ---
 
@@ -201,6 +204,8 @@ Configure destination folders, default resolution preferences (Highest, 1080p, 7
    - Paste URLs directly or import `.txt` / `.csv` batches in the **Download** tab.
 
 > **Windows Security Note:** SmartScreen reputation warnings and Defender Antivirus isolation are different events. Please read [Windows Security Guide](./WINDOWS_SECURITY.md) before filing issues. Verify `SHA256SUMS.txt` against GitHub provenance.
+>
+> **Windows 安全提醒：** SmartScreen 信譽提示與 Defender Antivirus 隔離是兩回事。遇到防毒警示請先查閱 [Windows 下載與安全驗證說明](./WINDOWS_SECURITY.md)，使用 `SHA256SUMS.txt` 比對 GitHub 原生建置產物；若備用包也被偵測，請停止並回報，不要直接停用保護。
 
 ---
 

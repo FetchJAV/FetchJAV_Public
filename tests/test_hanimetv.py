@@ -56,7 +56,13 @@ def test_hanimetv_browser_methods():
     assert 'search?q=momone' in search_url
 
 
-def test_canonical_slug_resolution():
+def test_canonical_slug_resolution(monkeypatch):
+    import M3U8Sites.SiteHanimeTV as hanime_mod
+    monkeypatch.setattr(hanime_mod, '_load_catalog', lambda: [
+        {'slug': 'momone-1', 'name': 'Momone 1'},
+        {'slug': 'resort-boin-uncensored-re-release-1', 'name': 'Resort Boin 1'},
+        {'slug': 'tsumamigui-3-ep-1', 'name': 'Tsumamigui 3 Episode 1'},
+    ])
     from M3U8Sites.SiteHanimeTV import _resolve_canonical_slug
     # Exact slug
     assert _resolve_canonical_slug('momone-1') == 'momone-1'

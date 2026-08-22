@@ -5077,13 +5077,13 @@ def generate_subtitles(video_path: str, mode,
         ocr_lang = config.get_video_ocr_lang()
         ocr_mode = config.get_video_ocr_auto_mode()
     except Exception:
-        ocr_enabled = True
+        ocr_enabled = False
         ocr_backend = 'auto'
         ocr_lang = 'zh'
-        ocr_mode = 'on_hardcoded_detected'
+        ocr_mode = 'manual_only'
 
     if ocr_enabled and not _existing(paths['zh-TW']):
-        if (satisfied_by_source and ocr_mode != 'manual_only') or ocr_mode == 'always':
+        if (satisfied_by_source and ocr_mode == 'on_hardcoded_detected') or ocr_mode == 'always':
             try:
                 _notify(progress_callback, 'ocr_extract', 0)
                 ocr_ok = generate_subtitles_via_ocr(
