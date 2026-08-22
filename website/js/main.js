@@ -48,6 +48,57 @@
     el.textContent = String(new Date().getFullYear());
   });
 
+  /* Version history on download page */
+  var verList = document.getElementById("versionList");
+  if (verList) {
+    var API_URL = "https://api.github.com/repos/FetchJAV/FetchJAV_Public/releases";
+
+    fetch(API_URL)
+      .then(function (res) { return res.json(); })
+      .then(function (releases) {
+        if (!Array.isArray(releases) || !releases.length) {
+          verList.innerHTML = '<div class="ver-loading">No releases found.</div>';
+          return;
+        }
+
+        var html = "";
+        releases.forEach(function (r, i) {
+          var tag = r.tag_name || "";
+          var name = r.name || tag;
+          var date = r.published_at ? new Date(r.published_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "";
+          var body = (r.body || "").split("\n").slice(0, 3).join(" ").replace(/[*_`#]/g, "").trim();
+          if (body.length > 140) body = body.slice(0, 140) + "…";
+          var latest = i === 0;
+          var exeAsset = (r.assets || []).find(function (a) { return a.name && a.name.endsWith(".exe"); });
+          var downloadUrl = exeAsset ? exeAsset.browser_download_url : r.html_url;
+          var allAssetsUrl = r.html_url;
+
+          html += '<div class="ver-item' + (latest ? " ver-latest" : "") + '">';
+          html += '  <div class="ver-info">';
+          html += '    <div class="ver-head">';
+          html += '      <span class="ver-tag">' + name + "</span>";
+          if (latest) html += '      <span class="ver-badge">Latest</span>';
+          html += '      <span class="ver-date">' + date + "</span>";
+          html += "    </div>";
+          if (body) html += '    <p class="ver-note">' + body + "</p>";
+          html += "  </div>";
+          html += '  <div class="ver-actions">';
+          html += '    <a class="btn btn-primary" href="' + downloadUrl + '" download>';
+          html += '      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:14px;height:14px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>';
+          html += "      Download";
+          html += "    </a>";
+          html += '    <a class="btn btn-ghost" href="' + allAssetsUrl + '" target="_blank" rel="noopener">View release</a>';
+          html += "  </div>";
+          html += "</div>";
+        });
+
+        verList.innerHTML = html;
+      })
+      .catch(function () {
+        verList.innerHTML = '<div class="ver-loading">Could not load releases. <a href="https://github.com/Deepu770/FetchJav-Help-Repo/releases" target="_blank" rel="noopener" style="color:var(--link);">View on GitHub</a></div>';
+      });
+  }
+
   /* Request form → GitHub issue */
   var reqForm = document.getElementById("requestForm");
   if (reqForm) {
