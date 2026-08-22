@@ -16,7 +16,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': 'Downloader', # Not used
-        'version_label': 'v0.1.7',
+        'version_label': 'v0.1.8',
         'by_author': '',
         'status_ready': '就緒',
         'site_label': '網站',
@@ -535,7 +535,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': 'Downloader', # Not used
-        'version_label': 'v0.1.7',
+        'version_label': 'v0.1.8',
         'by_author': '',
         'status_ready': 'Ready',
         'site_label': 'Site',
@@ -1042,7 +1042,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': '下载器', # Not used
-        'version_label': 'v0.1.7',
+        'version_label': 'v0.1.8',
         'by_author': '',
         'status_ready': '就绪',
         'site_label': '网站',
@@ -1548,7 +1548,7 @@ STRINGS = {
         # Header - These are no longer used by ModernApp but kept for compatibility
         'app_brand_1': 'FetchJAV',
         'app_brand_2': 'ダウンローダー', # Not used
-        'version_label': 'v0.1.7',
+        'version_label': 'v0.1.8',
         'by_author': '',
         'status_ready': '準備完了',
         'site_label': 'サイト',
