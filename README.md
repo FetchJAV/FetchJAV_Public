@@ -73,10 +73,11 @@ FetchJAV is a feature-rich Python desktop application for downloading, streaming
 
 | Feature | Description |
 |---------|-------------|
-| **Multi-Site Unified Browser** | Browse JableTV, MissAV, SupJav, and more in a single tab with search, filtering, cover cards, actress links, and multi-select bulk download |
+| **Multi-Site Unified Browser** | Browse JableTV, MissAV, SupJav, Hanime1, and more in a single tab with search, filtering, cover cards, actress links, and multi-select bulk download |
 | **Real-Time Streaming Preview** | Built-in local HTTP streaming proxy handles Range requests, repairs TS/MP4 headers, strips anti-scraping fake headers — watch before you download |
 | **CC Subtitle Player** | In-app subtitle overlay with online search, local `.srt`/`.vtt` loading, audio sync, track switching |
 | **High-Performance Download Manager** | Up to 32 simultaneous videos, 1–16 segment workers per video, bandwidth metering, speed limiting, resume/retry |
+| **Self-Healing Downloads** *(new in v0.1.9)* | Incomplete downloads keep their fetched segments; the next run re-fetches only the missing tail segments instead of restarting |
 | **AI Subtitle Pipeline** | Post-download automatic Japanese audio extraction; local ReazonSpeech/Whisper ASR; optional cloud LLM translation (OpenAI, Claude, DeepSeek, Ollama, Gemini) |
 | **Persistent History** | Download history, view history, and saved videos persist across restarts |
 | **Modern Dark UI** | CustomTkinter Material Design dark theme with accent color customization (Pink, Blue, Violet, Amber, Green), high-DPI support |
@@ -90,6 +91,9 @@ FetchJAV is a feature-rich Python desktop application for downloading, streaming
 | **Multi-language** | Full i18n in English, Traditional Chinese, Simplified Chinese, and Japanese |
 | **Clip Import** | Clipboard monitoring auto-detects valid URLs; `.txt`/`.csv` batch import |
 | **Online Subtitle Providers** | Integration with OpenSubtitles, Podnapisi, SubDL, SubtitleCat, YTS Subtitles |
+| **Hanime1 Filter Catalog** *(new in v0.1.9)* | Dedicated filter dialog with sorts, genres, dates, durations, and 240 searchable tags across 9 tag groups |
+| **Per-Site Watch Settings** *(new in v0.1.9)* | Independent output folder and baseline date for every site in the batch monitor, each with its own calendar picker |
+| **Filename Modes** *(new in v0.1.9)* | Save files with the full title or code-only names (`IPX-580.mp4` style), applied consistently in both apps |
 
 ---
 
@@ -97,7 +101,7 @@ FetchJAV is a feature-rich Python desktop application for downloading, streaming
 
 ### 1. Multi-Site Browse & Discovery Gallery
 
-Browse, search, and filter videos across **JableTV**, **MissAV**, and **SupJav** in a single unified interface. Features responsive high-resolution cover cards, actress links, studio details, and multi-selection for bulk downloads.
+Browse, search, and filter videos across **JableTV**, **MissAV**, **SupJav**, and **Hanime1** in a single unified interface. Features responsive high-resolution cover cards, actress links, studio details, and multi-selection for bulk downloads.
 
 <p align="center">
   <img src="./screenshots/02_browse_gallery.png" width="100%" alt="Multi-Site Browse & Discovery Gallery" />
@@ -188,7 +192,7 @@ Configure destination folders, default resolution preferences (Highest, 1080p, 7
 2. **Run**: Place it in any writable folder and double-click to launch (no Python or FFmpeg installation required).
 3. **Choose Language**: On first launch, pick your language and preferred theme.
 4. **Browse & Download**:
-   - In **Browse**, choose JableTV, MissAV, or SupJav, search keywords or browse categories.
+   - In **Browse**, choose JableTV, MissAV, SupJav, or Hanime1, search keywords or browse categories.
    - Click preview to watch immediately, or select cards to add to the download queue.
    - Paste URLs directly or import `.txt` / `.csv` batches in the **Download** tab.
 
