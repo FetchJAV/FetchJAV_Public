@@ -207,6 +207,45 @@ def set_subtitle_pref(pref):
         pass
 
 
+VALID_FILENAME_MODES = {'full-title', 'code-only'}
+
+
+def normalize_filename_mode(value):
+    """Return the shared output filename mode, preserving the default."""
+    mode = str(value or '').strip().lower().replace('_', '-')
+    aliases = {
+        '': 'full-title',
+        'full': 'full-title',
+        'title': 'full-title',
+        'complete': 'full-title',
+        'code': 'code-only',
+        'jav-code': 'code-only',
+        'number': 'code-only',
+    }
+    mode = aliases.get(mode, mode)
+    if mode in VALID_FILENAME_MODES:
+        return mode
+    return 'full-title'
+
+
+def get_filename_mode():
+    """Return full-title (default) or code-only for every downloader UI."""
+    return normalize_filename_mode(_load_prefs().get('filename_mode'))
+
+
+def set_filename_mode(value):
+    """Persist the shared filename mode without disturbing other preferences."""
+    mode = normalize_filename_mode(value)
+    try:
+        with _prefs_lock:
+            prefs = _load_prefs()
+            prefs['filename_mode'] = mode
+            _save_prefs(prefs)
+    except Exception:
+        pass
+    return mode
+
+
 DEFAULT_INACTIVE_SITES = {'Hanime1', 'TnaFlix'}
 
 

@@ -1,4 +1,5 @@
 import re
+import threading
 from urllib.parse import urlsplit
 import cloudscraper
 try:
@@ -41,6 +42,16 @@ def _unpack_js_eval(script_text):
 
 class SiteMissAV(M3U8Crawler):
     """Downloader for missav.ai and its mirrors."""
+
+    # MissAV's CDN becomes unreliable under many simultaneous videos x 16
+    # segment workers.  Keep each video modest, bound all MissAV instances
+    # together, and allow a longer resumable tail retry for isolated
+    # 429/timeout failures near 100%.
+    segment_worker_cap = 4
+    segment_retry_rounds = 10
+    segment_retry_base_delay = 1.5
+    segment_retry_max_delay = 8.0
+    _segment_request_gate = threading.BoundedSemaphore(8)
 
     _NON_VIDEO_SLUGS = {
         'chinese-subtitle', 'chinese-subtitles', 'uncensored-leak', 'uncensored',
@@ -112,6 +123,10 @@ class SiteMissAV(M3U8Crawler):
 
     _shared_scraper = None
     _scraper_lock = __import__('threading').Lock()
+
+    def _scrape(self, task):
+        with self._segment_request_gate:
+            return super()._scrape(task)
 
     @classmethod
     def _get_scraper(cls):

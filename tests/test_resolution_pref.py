@@ -178,6 +178,31 @@ def test_config_subtitle_mode_round_trip_and_validation(tmp_path, monkeypatch):
         assert json.load(handle)['subtitle_mode'] == 'none'
 
 
+def test_config_filename_mode_round_trip_aliases_and_validation(
+        tmp_path, monkeypatch):
+    path = tmp_path / 'ui_prefs.json'
+    monkeypatch.setattr(config, '_ui_prefs_path', lambda: str(path))
+
+    assert config.get_filename_mode() == 'full-title'
+
+    assert config.normalize_filename_mode('code') == 'code-only'
+    assert config.normalize_filename_mode('jav-code') == 'code-only'
+    assert config.normalize_filename_mode('number') == 'code-only'
+    assert config.normalize_filename_mode('FULL-TITLE') == 'full-title'
+    assert config.normalize_filename_mode(None) == 'full-title'
+    assert config.normalize_filename_mode('garbage') == 'full-title'
+
+    config.set_filename_mode('code')
+    assert config.get_filename_mode() == 'code-only'
+
+    config.set_filename_mode('not-a-mode')
+    assert config.get_filename_mode() == 'full-title'
+
+    with open(path, 'r', encoding='utf-8') as handle:
+        stored = json.load(handle)
+    assert stored['filename_mode'] == 'full-title'
+
+
 def test_recognition_quality_defaults_normalizes_and_shares_ui_prefs(
         tmp_path, monkeypatch):
     path = tmp_path / 'ui_prefs.json'

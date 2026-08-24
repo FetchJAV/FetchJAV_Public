@@ -21,10 +21,11 @@ Manifest format (served over HTTPS, e.g. GitHub Pages):
     }
 """
 
+import hashlib
 import json
 import os
 import threading
-from datetime import date
+from datetime import date, datetime
 
 import requests
 
@@ -32,7 +33,8 @@ import config
 
 BANNER_URL = 'https://fetchjav.github.io/FetchJAV_Public/banner.json'
 FETCH_TIMEOUT = 5
-CACHE_TTL_SEC = 12 * 3600
+IMAGE_TIMEOUT = 20
+CACHE_TTL_SEC = 3600
 ALLOWED_TYPES = {'info', 'update', 'ad'}
 
 _lock = threading.Lock()
@@ -49,13 +51,27 @@ def _cache_path() -> str:
     return os.path.join(_app_dir(), 'banner_cache.json')
 
 
+def _image_dir() -> str:
+    return os.path.join(_app_dir(), 'banner_images')
+
+
 def _dismissed_path() -> str:
     return os.path.join(_app_dir(), 'dismissed_banners.json')
 
 
-def _parse_date(value) -> 'date | None':
+def _parse_moment(value) -> 'datetime | None':
+    """Accept YYYY-MM-DD or a full ISO timestamp; naive = local time."""
+    text = str(value or '').strip()
+    if not text:
+        return None
+    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M',
+                '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
     try:
-        return date.fromisoformat(str(value).strip())
+        return datetime.combine(date.fromisoformat(text), datetime.min.time())
     except Exception:
         return None
 
@@ -96,12 +112,12 @@ def validate_manifest(raw) -> 'dict | None':
     if btype not in ALLOWED_TYPES:
         btype = 'info'
 
-    start = _parse_date(raw.get('start'))
-    end = _parse_date(raw.get('end'))
-    today = date.today()
-    if start and today < start:
+    start = _parse_moment(raw.get('start'))
+    end = _parse_moment(raw.get('end'))
+    now = datetime.now()
+    if start and now < start:
         return None
-    if end and today > end:
+    if end and now > end:
         return None
 
     min_ver = str(raw.get('min_version') or '').strip()
@@ -113,6 +129,9 @@ def validate_manifest(raw) -> 'dict | None':
         'title': title[:120],
         'message': str(raw.get('message') or '').strip()[:300],
         'url': _clean_url(raw.get('url')),
+        'image': _clean_url(raw.get('image')),
+        'start': raw.get('start') or '',
+        'end': raw.get('end') or '',
         'min_version': min_ver,
         'max_version': max_ver,
     }
@@ -174,6 +193,33 @@ def _write_cache(manifest: dict) -> None:
         pass
 
 
+def fetch_image(url: str) -> str:
+    """Download a banner image to the local cache; return its path or ''."""
+    if not url:
+        return ''
+    try:
+        os.makedirs(_image_dir(), exist_ok=True)
+        name = hashlib.sha1(url.encode('utf-8')).hexdigest()[:16] + '.img'
+        path = os.path.join(_image_dir(), name)
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            return path
+        proxy_kwargs = {}
+        try:
+            proxy_kwargs = config.proxy_request_kwargs()
+        except Exception:
+            pass
+        resp = requests.get(url, timeout=IMAGE_TIMEOUT, **proxy_kwargs)
+        if resp.status_code == 200 and resp.content:
+            tmp = path + '.part'
+            with open(tmp, 'wb') as f:
+                f.write(resp.content)
+            os.replace(tmp, path)
+            return path
+    except Exception:
+        pass
+    return ''
+
+
 def fetch_manifest(current_version: str = '', force: bool = False) -> 'dict | None':
     """Return the manifest to display, or None.
 
@@ -217,6 +263,8 @@ def fetch_manifest(current_version: str = '', force: bool = False) -> 'dict | No
             return None
         if current_version and not matches_versions(manifest, current_version):
             return None
+        if manifest.get('image'):
+            manifest['_image_path'] = fetch_image(manifest['image'])
         return manifest
 
 

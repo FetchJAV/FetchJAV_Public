@@ -10,6 +10,14 @@ from M3U8Sites.SiteJableTV import JableTVBrowser
 from M3U8Sites.SiteMissAV import MissAVBrowser
 from M3U8Sites.SiteSupJav import SupJavBrowser
 from M3U8Sites.SiteHanimeTV import HanimeTVBrowser
+from M3U8Sites.SiteHanime1 import (
+    HANIME1_FILTER_DATES,
+    HANIME1_FILTER_DURATIONS,
+    HANIME1_FILTER_GENRES,
+    HANIME1_FILTER_SORTS,
+    HANIME1_FILTER_TAG_GROUPS,
+    Hanime1Browser,
+)
 
 
 def _target(target_id, name, url, **extra):
@@ -201,11 +209,52 @@ HANIMETV_GROUPS = [
 ]
 
 
+HANIME1_GROUPS = [
+    _group('sorts', 'Sorts', [
+        _target(f'sort:{index}', name, Hanime1Browser.filter_url(sort=name))
+        for index, name in enumerate(HANIME1_FILTER_SORTS, start=1)
+    ]),
+    _group('genres', 'Genres', [
+        _target(f'genre:{index}', name, Hanime1Browser.filter_url(genre=name))
+        for index, name in enumerate(HANIME1_FILTER_GENRES, start=1)
+    ]),
+    _group('dates', 'Dates', [
+        _target(
+            f'date:{name}', name,
+            Hanime1Browser.filter_url(date=name),
+        )
+        for name in HANIME1_FILTER_DATES
+    ]),
+    _group('durations', 'Durations', [
+        _target(
+            f'duration:{name}', name,
+            Hanime1Browser.filter_url(duration=name),
+        )
+        for name in HANIME1_FILTER_DURATIONS
+    ]),
+]
+
+for _hanime_tag_group_id, _hanime_tags in HANIME1_FILTER_TAG_GROUPS:
+    HANIME1_GROUPS.append(_group(
+        f'hanime-tags:{_hanime_tag_group_id}',
+        f'Hanime tags: {_hanime_tag_group_id}',
+        [
+            _target(
+                f'tag:{_tag}', _tag,
+                Hanime1Browser.filter_url(tags=(_tag,)),
+            )
+            for _tag in _hanime_tags
+        ],
+        hanime_tag_group=True,
+    ))
+
+
 SITES = {
     'JableTV': {'browser': JableTVBrowser, 'groups': JABLE_GROUPS},
     'MissAV': {'browser': MissAVBrowser, 'groups': MISSAV_GROUPS},
     'SupJav': {'browser': SupJavBrowser, 'groups': SUPJAV_GROUPS},
     'HanimeTV': {'browser': HanimeTVBrowser, 'groups': HANIMETV_GROUPS},
+    'Hanime1': {'browser': Hanime1Browser, 'groups': HANIME1_GROUPS},
 }
 
 
@@ -215,6 +264,20 @@ _GROUP_LABEL_KEYS = {
     'providers': 'st_group_providers',
     'genres': 'st_group_genres',
     'makers': 'st_group_makers',
+    'dates': 'st_group_dates',
+    'durations': 'st_group_durations',
+}
+
+_HANIME_TAG_GROUP_LABEL_KEYS = {
+    'features': 'st_hanime_tags_features',
+    'relationships': 'st_hanime_tags_relationships',
+    'roles': 'st_hanime_tags_roles',
+    'characters': 'st_hanime_tags_characters',
+    'appearance': 'st_hanime_tags_appearance',
+    'clothing': 'st_hanime_tags_clothing',
+    'locations': 'st_hanime_tags_locations',
+    'themes': 'st_hanime_tags_themes',
+    'acts': 'st_hanime_tags_acts',
 }
 
 
@@ -242,6 +305,9 @@ def target_label(target):
 def group_label(group):
     if group.get('tag_group'):
         return site_i18n.loc(site_i18n.TAG_GROUPS, group['name'], group['name'])
+    if group.get('hanime_tag_group'):
+        group_id = group['id'].split(':', 1)[-1]
+        return T(_HANIME_TAG_GROUP_LABEL_KEYS.get(group_id, group['name']))
     return T(_GROUP_LABEL_KEYS.get(group['id'], group['name']))
 
 
