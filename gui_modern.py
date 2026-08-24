@@ -187,7 +187,7 @@ from ui_theme import (
 import analytics
 import banner
 
-APP_VERSION = '0.1.9'
+APP_VERSION = '0.1.10'
 
 # issue #24: startup breadcrumbs — no-op if crashlog unavailable
 try:
