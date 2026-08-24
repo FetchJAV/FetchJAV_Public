@@ -93,6 +93,9 @@ def _load_catalog():
         )
         if resp.status_code == 200:
             data = resp.json()
+            # The search_hvs API now wraps the list as {"data": [...], "ads": [...]}
+            if isinstance(data, dict):
+                data = data.get('data')
             if isinstance(data, list):
                 with _cache_lock:
                     _catalog_cache = data
