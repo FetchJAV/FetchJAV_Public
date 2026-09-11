@@ -1,0 +1,60 @@
+{
+  "$comment": "FetchJAV <-> upstream ownership map. Read by scripts/sync_upstream.py. Classes: 'fetchjav_owned' (never auto-modified by upstream; reserved for files/features FetchJAV itself added or modified, NOT for inherited files it merely kept), 'upstream_owned' (safe to auto-adopt upstream when FetchJAV has not diverged), anything else => 'shared' (3-way merge with the fork base, conflicts reported for manual resolution). 'preserve' re-inserts FetchJAV-kept feature blocks that upstream removed from a shared file (block lines must match the fork base exactly; inserted before 'insert_before'). Patterns are fnmatch-style globs relative to the repo root.",
+  "fetchjav_owned": [
+    ".gitignore",
+    "gui_modern.py",
+    "ui_theme.py",
+    "video_preview.py",
+    "translation_settings_ui.py",
+    "updater.py",
+    "subtitle/**",
+    "metadata_fetcher.py",
+    "scratch_yts.html",
+    "scripts/generate_icons.py",
+    "img/icon_*.png",
+    "img/favicon-*.png",
+    "img/favicon-code.html",
+    "img/favicon.ico",
+    "img/apple-touch-icon*.png",
+    "img/jav_gradient_*.png",
+    "img/logo.png",
+    "logo.ico",
+    "logo.png",
+    "README.md",
+    "README.en.md",
+    "WINDOWS_SECURITY.md",
+    "tests/test_saved_videos.py",
+    "tests/test_hot_reload.py",
+    "tests/test_subtitle_system.py",
+    "tests/test_video_preview.py"
+  ],
+  "upstream_owned": [
+    "ssl_util.py",
+    "llm_translation.py",
+    "docker_cli.py",
+    "site_i18n.py",
+    "smalltool_categories.py",
+    "take_screenshots.py",
+    "test_functions.py",
+    "test_multi_dl.py",
+    "M3U8Sites/SiteJableTV.py",
+    "img/star-history.svg",
+    "img/readme_modern.png",
+    "img/readme_smalltool.png"
+  ],
+  "preserve": {
+    "args.py": [
+      {
+        "insert_before": "    return parser",
+        "lines": [
+          "    parser.add_argument(",
+          "        \"--hot-reload\", \"-hr\", \"--watch\", action='store_true',",
+          "        help=\"Enable hot reloading mode (watches source files and restarts app on change)\")",
+          "    parser.add_argument(",
+          "        \"--watch-interval\", type=float, default=1.0, metavar=\"SEC\",",
+          "        help=\"File watcher poll interval in seconds (default: 1.0)\")"
+        ]
+      }
+    ]
+  }
+}

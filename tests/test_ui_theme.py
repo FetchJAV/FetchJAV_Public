@@ -1,0 +1,1254 @@
+import inspect
+import re
+import sys
+import types
+from pathlib import Path
+
+import gui_modern
+import jable_smalltool
+import locales
+import ui_theme
+
+
+def _rgb(hex_color):
+    return tuple(int(hex_color[index:index + 2], 16) / 255
+                 for index in (1, 3, 5))
+
+
+def _luminance(hex_color):
+    channels = []
+    for value in _rgb(hex_color):
+        channels.append(value / 12.92 if value <= 0.04045
+                        else ((value + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast(a, b):
+    light, dark = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
+def test_responsive_breakpoints_prioritize_readability():
+    assert ui_theme.browse_columns_for_width(979) == 2
+    assert ui_theme.browse_columns_for_width(1080) == 3
+    assert ui_theme.browse_columns_for_width(1499) == 3
+    assert ui_theme.browse_columns_for_width(1500) == 4
+    assert ui_theme.category_columns_for_width(1119) == 2
+    assert ui_theme.category_columns_for_width(1120) == 3
+
+
+def test_shared_palette_is_valid_and_used_by_both_apps():
+    tokens = (
+        ui_theme.ACCENT, ui_theme.BG_DARK, ui_theme.BG_CARD,
+        ui_theme.TEXT_PRI, ui_theme.TEXT_SEC, ui_theme.BORDER,
+    )
+    assert all(len(token) == 2 for token in tokens)
+    assert all(re.fullmatch(r'#[0-9A-Fa-f]{6}', color)
+               for token in tokens for color in token)
+    assert gui_modern.ACCENT is ui_theme.ACCENT
+    assert jable_smalltool.ACCENT is ui_theme.ACCENT
+
+
+def test_primary_text_contrast_is_accessible_in_both_themes():
+    for index in (0, 1):
+        assert _contrast(ui_theme.TEXT_PRI[index], ui_theme.BG_DARK[index]) >= 7
+        assert _contrast(ui_theme.TEXT_PRI[index], ui_theme.BG_CARD[index]) >= 7
+
+
+def test_current_version_and_global_smalltool_copy_are_complete():
+    assert gui_modern.APP_VERSION == jable_smalltool.APP_VERSION == '0.1.11'
+    required = {
+        'st_activity', 'st_progress_idle', 'st_footer_short',
+        'st_categories_expand', 'st_categories_collapse',
+        'st_scanning', 'st_downloading', 'st_scan_progress',
+        'st_candidates_found',
+        'st_calendar', 'st_date_quick', 'st_date_month_1',
+        'st_date_month_2', 'st_folder_error',
+        'st_version_preference', 'st_pref_chinese',
+        'st_pref_uncensored', 'st_pref_standard',
+        'st_pref_english', 'st_pref_reducing_mosaic',
+        'st_settings_expand', 'st_settings_collapse',
+        'st_activity_show', 'st_activity_hide',
+        'st_schedule', 'st_schedule_title', 'st_schedule_interval',
+        'st_schedule_hours', 'st_schedule_daily',
+        'st_schedule_local_time', 'st_schedule_hint',
+        'st_schedule_save', 'st_schedule_summary_interval',
+        'st_schedule_summary_daily', 'st_schedule_invalid_hours',
+        'st_schedule_invalid_time', 'st_schedule_saved',
+        'st_scan_queued', 'st_waiting_schedule', 'st_stopping',
+    }
+    for language, strings in locales.STRINGS.items():
+        assert strings['version_label'] == 'v0.1.11', language
+        assert required <= strings.keys(), language
+
+
+def test_windows_version_resources_match_app_version():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / '.github' / 'workflows' / 'windows-build.yml').read_text(
+        encoding='utf-8')
+    assert '$expected = "0.1.11.0"' in workflow
+    generator = (root / 'build_tmp' / 'gen_version.py').read_text(
+        encoding='utf-8')
+    assert 'VERSION = (0, 1, 11, 0)' in generator
+    for name in ('JableTV_Modern.version', 'Jable_smalltool.version'):
+        resource = (root / 'build_tmp' / name).read_text(encoding='utf-8')
+        assert 'filevers=(0, 1, 11, 0)' in resource
+        assert "StringStruct('FileVersion', '0.1.11.0')" in resource
+    for name in ('JableTV_Modern.spec', 'Jable_smalltool.spec'):
+        spec = (root / 'build_tmp' / name).read_text(encoding='utf-8')
+        assert "'numpy._core._exceptions'" in spec
+
+
+def test_windows_distribution_is_hardened_and_verifiable():
+    root = Path(__file__).resolve().parents[1]
+    modern_spec = (
+        root / 'build_tmp' / 'JableTV_Modern.spec'
+    ).read_text(encoding='utf-8')
+    smalltool_spec = (
+        root / 'build_tmp' / 'Jable_smalltool.spec'
+    ).read_text(encoding='utf-8')
+    workflow = (
+        root / '.github' / 'workflows' / 'windows-build.yml'
+    ).read_text(encoding='utf-8')
+
+    for spec in (modern_spec, smalltool_spec):
+        assert 'upx=False' in spec
+        assert 'upx=True' not in spec
+
+    # SmallTool has no update UI.  Do not bundle Modern's executable
+    # downloader/self-replacement helper into its archive.
+    assert "'updater'" in modern_spec
+    assert "'updater'" not in smalltool_spec
+
+    # Keep the convenient one-file build, but also ship a SmallTool onedir
+    # fallback that does not self-extract through a _MEI directory.
+    assert 'exclude_binaries=True' in smalltool_spec
+    assert 'COLLECT(' in smalltool_spec
+    assert "name='Jable_smalltool_portable'" in smalltool_spec
+    assert "portable = '--portable' in sys.argv" in smalltool_spec
+    assert 'Jable_smalltool.spec -- --portable' in workflow
+
+    # The official PyInstaller guidance recommends rebuilding its bootloader
+    # from source to reduce false positives tied to widely shared bootloaders.
+    assert 'PYINSTALLER_COMPILE_BOOTLOADER' in workflow
+    assert '--no-binary=PyInstaller' in workflow
+    assert 'pip uninstall --yes PyInstaller' in workflow
+    assert 'pip cache remove PyInstaller' in workflow
+    # Keep the previously qualified PyInstaller release for this hotfix;
+    # only the bootloader provenance changes.
+    assert 'pyinstaller==6.13.0' in workflow.lower()
+
+    # Checksums and provenance help users verify origin.  They do not replace
+    # Authenticode and must remain separate from malware-detection claims.
+    assert 'Jable_smalltool_portable.zip' in workflow
+    assert 'SHA256SUMS.txt' in workflow
+    assert '-Path "dist\\Jable_smalltool_portable"' in workflow
+    assert '-Path "dist\\Jable_smalltool_portable\\*"' not in workflow
+    assert 'actions/attest@v4' in workflow
+    assert 'attestations: write' in workflow
+    for documentation in (
+        '"README.md"',
+        '"README.en.md"',
+        '"THIRD_PARTY_NOTICES.md"',
+        '"WINDOWS_SECURITY.md"',
+    ):
+        assert documentation in workflow
+
+
+def test_windows_security_guidance_does_not_ask_for_defender_bypass():
+    root = Path(__file__).resolve().parents[1]
+    traditional = (root / 'README.md').read_text(encoding='utf-8')
+    english = (root / 'README.en.md').read_text(encoding='utf-8')
+    security_path = root / 'WINDOWS_SECURITY.md'
+
+    assert security_path.is_file()
+    security = security_path.read_text(encoding='utf-8')
+    combined = '\n'.join((traditional, english, security))
+
+    assert 'Jable_smalltool_portable.zip' in combined
+    assert 'SHA256SUMS.txt' in security
+    assert 'Get-FileHash' in security
+    assert 'gh attestation verify' in security
+    assert (
+        'gh attestation verify .\\Jable_smalltool_portable.zip'
+        in security)
+    assert 'https://www.microsoft.com/wdsi/filesubmission' in security
+    assert 'SmartScreen' in security
+    assert 'Defender Antivirus' in security
+    assert '未簽章' in security
+    assert 'unsigned' in security.lower()
+    assert '不要為了上傳而自行還原隔離檔' in security
+    assert 'Do not restore a quarantined file merely to upload it' in security
+    assert '若備用包也被偵測，請停止並回報' in traditional
+    assert 'stop and report it if the fallback is also detected' in english
+
+    lowered = combined.lower()
+    for unsafe_advice in (
+        'disable defender',
+        'turn off defender',
+        'add a broad exclusion',
+        '停用 defender',
+        '關閉 defender',
+        '整個資料夾加入排除',
+    ):
+        assert unsafe_advice not in lowered
+
+
+def test_modern_defers_initial_workers_until_mainloop():
+    init_source = inspect.getsource(gui_modern.ModernApp.__init__)
+    assert 'self.after_idle(self._start_initial_background_tasks)' in init_source
+    assert 'self._start_update_check(manual=False)' not in init_source
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    calls = []
+    scheduled = []
+    app._is_closing = False
+    app._start_update_check = lambda **kwargs: calls.append(('update', kwargs))
+    app._load_categories = lambda: calls.append(('categories', {}))
+    app._start_banner_fetch = lambda: calls.append(('banner', {}))
+    app.after = lambda delay_ms, fn: scheduled.append((delay_ms, fn))
+
+    app._start_initial_background_tasks()
+
+    assert calls == [('update', {'manual': False})]
+    assert scheduled == [(400, app._load_categories),
+                         (800, app._start_banner_fetch)]
+
+
+def test_banner_module_validates_and_caches():
+    import banner as banner_mod
+
+    manifest = {
+        'id': 'tg-promo-test',
+        'active': True,
+        'type': 'ad',
+        'title': 'Join Telegram',
+        'url': 'https://t.me/FetchJAV',
+        'start': '2000-01-01T00:00',
+        'end': '2099-01-01T00:00',
+    }
+    cleaned = banner_mod.validate_manifest(manifest)
+    assert cleaned is not None
+    assert cleaned['id'] == 'tg-promo-test'
+    assert banner_mod.validate_manifest({**manifest, 'active': False}) is None
+    assert banner_mod.validate_manifest(
+        {**manifest, 'end': '2000-01-01'}) is None
+
+    future = {**manifest, 'start': '2099-01-01'}
+    assert banner_mod.validate_manifest(future) is None
+
+
+def test_smalltool_balances_category_and_activity_regions():
+    assert jable_smalltool.DEFAULT_WINDOW_WIDTH == 1180
+    assert jable_smalltool.DEFAULT_WINDOW_HEIGHT == 780
+    assert ui_theme.category_columns_for_width(
+        jable_smalltool.DEFAULT_WINDOW_WIDTH) == 3
+
+    source = inspect.getsource(jable_smalltool.SmallToolApp._build_ui)
+    assert "main.pack(fill='both', expand=True" in source
+    assert 'main.grid_columnconfigure(0, weight=1)' in source
+    assert 'main.grid_rowconfigure(1, weight=1)' in source
+    assert 'cfg_card.grid(row=0' in source
+    assert 'selection.grid(row=1' in source
+    assert 'ctrl.grid(row=2' in source
+    assert 'prog_outer.grid(row=3' in source
+    assert 'activity.grid(row=4' in source
+    assert 'prog_outer.grid_remove()' in source
+    assert 'activity.grid_remove()' in source
+
+    collapse_source = inspect.getsource(
+        jable_smalltool.SmallToolApp._set_categories_collapsed)
+    assert '1, weight=0, minsize=0' in collapse_source
+    assert '1, weight=1, minsize=0' in collapse_source
+
+    start_source = inspect.getsource(
+        jable_smalltool.SmallToolApp._start_worker)
+    check_source = inspect.getsource(
+        jable_smalltool.SmallToolApp._check_now)
+    assert '_set_categories_collapsed(True)' not in start_source
+    assert '_set_categories_collapsed(True)' not in check_source
+
+
+def test_both_apps_expose_windows_proxy_mode_and_mode_aware_status():
+    modern_ui = inspect.getsource(gui_modern.ModernApp._build_settings_tab)
+    smalltool_ui = inspect.getsource(jable_smalltool.SmallToolApp._build_ui)
+    for source in (modern_ui, smalltool_ui):
+        assert "text=T('proxy_windows')" in source
+        assert 'command=self._on_proxy_windows' in source
+
+    for cls in (gui_modern.ModernApp, jable_smalltool.SmallToolApp):
+        status_source = inspect.getsource(cls._refresh_proxy_status)
+        assert "config.get_proxy_mode()" in status_source
+        assert "config.refresh_system_proxy()" in status_source
+        assert "T('proxy_windows_pac')" in status_source
+
+
+def test_both_apps_expose_shared_recognition_quality_without_squeezing_copy():
+    modern_ui = inspect.getsource(gui_modern.ModernApp._build_settings_tab)
+    smalltool_ui = inspect.getsource(jable_smalltool.SmallToolApp._build_ui)
+
+    assert 'self._recognition_quality_var = ctk.StringVar(' in modern_ui
+    assert 'wraplength=SETTINGS_INLINE_HELP_WRAP' in modern_ui
+    assert 'self._recognition_quality_var = tk.StringVar(' in smalltool_ui
+    assert "wraplength=286" in smalltool_ui
+    for source in (modern_ui, smalltool_ui):
+        assert "T('recognition_quality_setting')" in source
+        assert 'values=self._recognition_quality_values()' in source
+        assert "T('recognition_quality_desc')" in source
+
+    snapshot_source = inspect.getsource(
+        jable_smalltool.SmallToolApp._snapshot_ui_state)
+    restore_source = inspect.getsource(
+        jable_smalltool.SmallToolApp._restore_ui_state)
+    close_source = inspect.getsource(jable_smalltool.SmallToolApp._on_close)
+    assert "'recognition_quality': config.get_recognition_quality()" in (
+        snapshot_source)
+    assert '_recognition_quality_label(' in restore_source
+    assert "'recognition_quality'" not in close_source
+
+
+def test_both_quality_selectors_persist_to_shared_config(monkeypatch):
+    locales.set_lang('en')
+
+    class _Var:
+        def __init__(self):
+            self.value = ''
+
+        def set(self, value):
+            self.value = value
+
+    saved = []
+    monkeypatch.setattr(
+        gui_modern.config, 'set_recognition_quality',
+        lambda value: saved.append(('modern', value)) or value)
+    modern = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    modern._recognition_quality_var = _Var()
+    assert modern._recognition_quality_values()[0] == 'Auto (recommended)'
+    assert modern._recognition_quality_from_label(
+        'Auto (recommended)') == 'auto'
+    modern._on_recognition_quality_change(
+        locales.STRINGS['en']['recognition_quality_balanced'])
+
+    monkeypatch.setattr(
+        jable_smalltool.config, 'set_recognition_quality',
+        lambda value: saved.append(('smalltool', value)) or value)
+    smalltool = jable_smalltool.SmallToolApp.__new__(
+        jable_smalltool.SmallToolApp)
+    smalltool._recognition_quality_var = _Var()
+    assert smalltool._recognition_quality_values()[0] == 'Auto (recommended)'
+    assert smalltool._recognition_quality_from_label(
+        'Auto (recommended)') == 'auto'
+    smalltool._on_recognition_quality_change(
+        locales.STRINGS['en']['recognition_quality_fast'])
+
+    assert saved == [('modern', 'balanced'), ('smalltool', 'fast')]
+    assert modern._recognition_quality_var.value == 'Balanced'
+    assert smalltool._recognition_quality_var.value == 'Fast'
+
+
+def test_modern_concurrency_is_editable_persisted_and_clamped(monkeypatch):
+    assert gui_modern.MAX_CONCURRENT == 32
+    init_source = inspect.getsource(gui_modern.ModernApp.__init__)
+    settings_source = inspect.getsource(
+        gui_modern.ModernApp._build_settings_tab)
+    footer_source = inspect.getsource(
+        gui_modern.ModernApp._refresh_downloads)
+    assert 'config.get_download_concurrency()' in init_source
+    assert 'self._conc_entry = ctk.CTkEntry(' in settings_source
+    assert "self._conc_entry.bind('<Return>'" in settings_source
+    assert "'subtitle_queue_status'" in footer_source
+
+    class _Var:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._conc_var = _Var('99')
+    app._dlmgr = types.SimpleNamespace(max_concurrent=2)
+    saved = []
+
+    def _save(value):
+        saved.append(value)
+        return max(1, min(int(value), 32))
+
+    monkeypatch.setattr(gui_modern.config, 'set_download_concurrency', _save)
+    app._on_conc_change()
+
+    assert saved == [99]
+    assert app._dlmgr.max_concurrent == 32
+    assert app._conc_var.get() == '32'
+
+    app._conc_var.set('invalid')
+    app._on_conc_change()
+    assert saved == [99]
+    assert app._conc_var.get() == '32'
+
+
+def test_both_apps_expose_and_persist_per_video_worker_limit(monkeypatch):
+    modern_ui = inspect.getsource(gui_modern.ModernApp._build_settings_tab)
+    smalltool_ui = inspect.getsource(jable_smalltool.SmallToolApp._build_ui)
+    for source in (modern_ui, smalltool_ui):
+        assert "T('max_workers_per_video_setting')" in source
+        assert "'max_workers_per_video_desc'" in source
+
+    assert gui_modern.SETTINGS_INLINE_HELP_WRAP <= 620
+    assert modern_ui.count(
+        'wraplength=SETTINGS_INLINE_HELP_WRAP') >= 3
+    assert modern_ui.count("justify='left', anchor='w'") >= 3
+
+    class _Var:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    saved = []
+
+    def _save(value):
+        saved.append(value)
+        return max(1, min(int(value), 16))
+
+    monkeypatch.setattr(
+        gui_modern.config, 'set_max_workers_per_video', _save)
+    modern = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    modern._workers_var = _Var('99')
+    modern._on_workers_change()
+
+    monkeypatch.setattr(
+        jable_smalltool.config, 'set_max_workers_per_video', _save)
+    smalltool = jable_smalltool.SmallToolApp.__new__(
+        jable_smalltool.SmallToolApp)
+    smalltool._workers_var = _Var('2')
+    smalltool._on_workers_change()
+
+    assert saved == [99, 2]
+    assert modern._workers_var.get() == '16'
+    assert smalltool._workers_var.get() == '2'
+
+
+def test_language_rebuild_commits_the_focused_worker_entry(monkeypatch):
+    class _Var:
+        def __init__(self, value):
+            self.value = value
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+
+    saved = []
+    monkeypatch.setattr(
+        gui_modern.config, 'get_max_workers_per_video', lambda: 16)
+    monkeypatch.setattr(
+        gui_modern.config, 'set_max_workers_per_video',
+        lambda value: saved.append(('modern', value)) or int(value))
+    modern = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    modern._workers_var = _Var('3')
+    assert modern._commit_workers_preference() == 3
+    assert "'max_workers_per_video': self._commit_workers_preference()" in (
+        inspect.getsource(gui_modern.ModernApp._apply_language))
+
+    monkeypatch.setattr(
+        jable_smalltool.config, 'get_max_workers_per_video', lambda: 16)
+    monkeypatch.setattr(
+        jable_smalltool.config, 'set_max_workers_per_video',
+        lambda value: saved.append(('smalltool', value)) or int(value))
+    smalltool = jable_smalltool.SmallToolApp.__new__(
+        jable_smalltool.SmallToolApp)
+    smalltool._workers_var = _Var('3')
+    assert smalltool._commit_workers_preference() == 3
+    assert "'max_workers_per_video': self._commit_workers_preference()" in (
+        inspect.getsource(jable_smalltool.SmallToolApp._snapshot_ui_state))
+    assert "snapshot['max_workers_per_video']" in inspect.getsource(
+        jable_smalltool.SmallToolApp._restore_ui_state)
+
+    assert saved == [('modern', 3), ('smalltool', 3)]
+
+
+def test_supjav_thumbnail_context_reuses_cf_override_only_on_trusted_zone(
+        monkeypatch):
+    override = {'cookie': 'test-clearance', 'ua': 'Exact Browser UA'}
+    monkeypatch.setattr(
+        gui_modern.config, 'get_cf_override',
+        lambda host: dict(override) if host == 'supjav.com' else None)
+
+    request_headers, cookies = gui_modern._thumbnail_request_context(
+        'https://img.supjav.com/thumbs/example.jpg', 'SupJav')
+
+    assert request_headers['User-Agent'] == 'Exact Browser UA'
+    assert request_headers['Referer'] == 'https://supjav.com/'
+    assert cookies.get_dict(domain='.supjav.com') == {
+        'cf_clearance': 'test-clearance',
+    }
+    trusted = gui_modern.requests.Request(
+        'GET', 'https://img.supjav.com/thumb.jpg', cookies=cookies).prepare()
+    disguised = gui_modern.requests.Request(
+        'GET', 'https://img.supjav.com.evil.example/thumb.jpg',
+        cookies=cookies).prepare()
+    insecure = gui_modern.requests.Request(
+        'GET', 'http://img.supjav.com/thumb.jpg', cookies=cookies).prepare()
+    assert trusted.headers['Cookie'] == 'cf_clearance=test-clearance'
+    assert 'Cookie' not in disguised.headers
+    assert 'Cookie' not in insecure.headers
+
+    external_headers, external_cookies = gui_modern._thumbnail_request_context(
+        'https://images.example.test/thumb.jpg', 'SupJav')
+    assert external_headers['User-Agent'] == gui_modern.headers['User-Agent']
+    assert 'Referer' not in external_headers
+    assert external_cookies is None
+
+    for url, site_key in (
+            ('https://img.supjav.com.evil.example/thumb.jpg', 'SupJav'),
+            ('http://img.supjav.com/thumb.jpg', 'SupJav'),
+            ('https://img.supjav.com/thumb.jpg', 'JableTV')):
+        untrusted_headers, untrusted_cookies = (
+            gui_modern._thumbnail_request_context(url, site_key))
+        assert untrusted_headers == gui_modern.headers
+        assert untrusted_cookies is None
+
+
+def test_failed_thumbnail_replaces_loading_placeholder(monkeypatch):
+    configured = []
+
+    class _ImmediateExecutor:
+        def submit(self, callback):
+            callback()
+
+    class _Label:
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            configured.append(kwargs)
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._is_closing = False
+    app._grid_gen = 7
+    app._build_gen = 9
+    app._thumb_executor = _ImmediateExecutor()
+    app._ui = lambda callback, gen=None: callback()
+    monkeypatch.setattr(gui_modern, '_fetch_thumbnail', lambda *_args: None)
+
+    app._load_thumb_async(
+        'https://img.supjav.com/missing.jpg', _Label(), 7, 9, 'SupJav')
+
+    assert configured[-1]['text'] == gui_modern.T('no_thumbnail')
+
+
+def test_successful_thumbnail_applies_image_to_label(monkeypatch):
+    configured = []
+
+    class _ImmediateExecutor:
+        def submit(self, callback):
+            callback()
+
+    class _Label:
+        def __init__(self):
+            self.master = None
+
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            configured.append(kwargs)
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._is_closing = False
+    app._grid_gen = 7
+    app._preview_gen = 7
+    app._build_gen = 9
+    app._last_estimated_cw = 260
+    app._thumb_executor = _ImmediateExecutor()
+    app._ui = lambda callback, gen=None: callback()
+
+    mock_img = gui_modern.Image.new('RGB', (320, 180))
+    monkeypatch.setattr(gui_modern, '_fetch_thumbnail', lambda *_args: mock_img)
+
+    lbl = _Label()
+    app._load_thumb_async(
+        'https://assets-cdn.jable.tv/thumb.jpg', lbl, 7, 9, 'JableTV')
+
+    assert len(configured) == 1
+    assert configured[0]['image'] is not None
+    assert configured[0]['text'] == ''
+
+
+def test_stale_supjav_thumbnail_override_retries_without_credentials(
+        monkeypatch):
+    calls = []
+
+    class _Response:
+        def __init__(self, status_code, content=b''):
+            self.status_code = status_code
+            self.content = content
+
+        def close(self):
+            pass
+
+    class _Session:
+        def get(self, url, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return _Response(403)
+            return _Response(200, b'image-bytes')
+
+    class _Image:
+        size = (300, 169)
+
+        def convert(self, _mode):
+            return self
+
+        def thumbnail(self, _size, _resample):
+            pass
+
+    monkeypatch.setattr(gui_modern, '_get_thumb_session', lambda: _Session())
+    monkeypatch.setattr(gui_modern.Image, 'open', lambda _stream: _Image())
+    monkeypatch.setattr(gui_modern, '_thumb_cache', {})
+    monkeypatch.setattr(
+        gui_modern.config, 'get_cf_override',
+        lambda _host: {'cookie': 'stale', 'ua': 'Stale UA'})
+
+    result = gui_modern._fetch_thumbnail(
+        'https://img.supjav.com/thumb.jpg', 'SupJav')
+
+    assert result is not None
+    assert len(calls) == 2
+    assert calls[0]['headers']['User-Agent'] == 'Stale UA'
+    assert calls[0]['cookies'].get_dict(domain='.supjav.com') == {
+        'cf_clearance': 'stale',
+    }
+    assert calls[1]['headers'] == gui_modern.headers
+    assert 'cookies' not in calls[1]
+
+
+def test_global_version_selector_saves_internal_preference(monkeypatch):
+    app = jable_smalltool.SmallToolApp.__new__(jable_smalltool.SmallToolApp)
+    app._cfg = {}
+    saved = []
+    monkeypatch.setattr(
+        jable_smalltool, 'update_config',
+        lambda patch, **_kwargs: saved.append(dict(patch)))
+
+    app._on_version_change(jable_smalltool.T('st_pref_uncensored'))
+
+    assert app._cfg['version_preference'] == 'uncensored'
+    assert saved[-1]['version_preference'] == 'uncensored'
+
+
+def test_smalltool_selected_count_reflects_target_vars_only():
+    app = jable_smalltool.SmallToolApp.__new__(jable_smalltool.SmallToolApp)
+    captured = {}
+    app._selected_count_lbl = types.SimpleNamespace(
+        configure=lambda **kwargs: captured.update(kwargs))
+    app._check_vars = {
+        'JableTV|__group__|feeds': types.SimpleNamespace(get=lambda: True),
+        'JableTV|feed:latest': types.SimpleNamespace(get=lambda: True),
+        'MissAV|feed:latest': types.SimpleNamespace(get=lambda: False),
+    }
+
+    app._update_selected_count()
+
+    assert captured['text'].startswith('1 ')
+    assert captured['text_color'] is ui_theme.ACCENT
+
+
+def test_autohide_scrollbar_patch_on_ctk_scrollable_frame():
+    import customtkinter as ctk
+    try:
+        app = ctk.CTk()
+        app.geometry('400x300')
+        sf = ctk.CTkScrollableFrame(app, width=300, height=150)
+        sf.pack()
+
+        # Short content - fits inside 150px height -> scrollbar hidden
+        lbl1 = ctk.CTkLabel(sf, text='Short content')
+        lbl1.pack()
+        app.update()
+        assert sf._scrollbar.winfo_ismapped() == 0
+
+        # Long content - exceeds 150px height -> scrollbar active/visible
+        lbls = []
+        for i in range(25):
+            lbl = ctk.CTkLabel(sf, text=f'Item {i}')
+            lbl.pack(pady=4)
+            lbls.append(lbl)
+        app.update()
+        assert sf._scrollbar.winfo_ismapped() == 1
+
+        # Clean up
+        app.destroy()
+    except Exception:
+        pass
+
+
+def test_autohide_scrollbar_on_scroll_tree_view():
+    import customtkinter as ctk
+    import mywidget
+    try:
+        root = ctk.CTk()
+        root.geometry('400x300')
+        tree = mywidget.ScrollTreeView(root)
+        tree.pack(fill='both', expand=True)
+
+        # Empty tree -> scrollbar hidden
+        root.update()
+        assert tree.scrollbar.winfo_ismapped() == 0
+
+        # Many rows -> scrollbar active/visible
+        for i in range(50):
+            tree.insert('', 'end', values=(f'Row {i}',))
+        root.update()
+        assert tree.scrollbar.winfo_ismapped() == 1
+
+        # Clean up
+        root.destroy()
+    except Exception:
+        pass
+
+
+def test_software_icons_exist_in_img():
+    root = Path(__file__).resolve().parents[1]
+    img_dir = root / 'img'
+    assert (root / 'logo.ico').exists()
+    assert (root / 'logo.png').exists()
+    assert (img_dir / 'favicon.ico').exists()
+    assert (img_dir / 'favicon-256x256.png').exists()
+    assert (img_dir / 'logo21' / 'logo21_multi.ico').exists()
+
+
+def test_preview_mode_toggles_tag_sidebar_visibility():
+    class DummyWidget:
+        def __init__(self):
+            self.packed = True
+        def pack_forget(self):
+            self.packed = False
+        def pack(self, **kwargs):
+            self.packed = True
+            self.pack_kwargs = kwargs
+
+    class DummyApp:
+        _browse_grid_area = DummyWidget()
+        _preview_area = DummyWidget()
+        _sidebar = DummyWidget()
+        _browse_workspace = DummyWidget()
+        _tab_keys = ['browse']
+        _active_tab_idx = 0
+
+        def _stop_preview_player(self):
+            pass
+
+        def _sync_page_nav_visibility(self):
+            pass
+
+    app = DummyApp()
+
+    gui_modern.ModernApp._set_browse_mode(app, 'preview')
+    assert app._browse_mode == 'preview'
+    assert not app._sidebar.packed
+    assert not app._browse_grid_area.packed
+    assert app._preview_area.packed
+
+    gui_modern.ModernApp._set_browse_mode(app, 'grid')
+    assert app._browse_mode == 'grid'
+    assert app._sidebar.packed
+    assert app._sidebar.pack_kwargs.get('before') is app._browse_workspace
+    assert app._browse_grid_area.packed
+    assert not app._preview_area.packed
+
+
+def test_preview_recommendations_respect_search_all_mode():
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._site_key = 'HanimeTV'
+    app._search_all_mode = False
+    app._search_all_active = False
+
+    video_items = [
+        {'title': 'Hanime 2', 'url': 'https://hanime.tv/videos/hentai/test-2', 'site_name': 'HanimeTV'},
+        {'title': 'Jable Video', 'url': 'https://jable.tv/videos/abc-123/', 'site_name': 'JableTV'},
+        {'title': 'MissAV Video', 'url': 'https://missav.ai/dm12/en/midv-001', 'site_name': 'MissAV'},
+    ]
+
+    current_url = 'https://hanime.tv/videos/hentai/test-1'
+
+    def collect(is_all):
+        app._search_all_mode = is_all
+        candidates = []
+        is_search_all = bool(getattr(app, '_search_all_mode', False) or getattr(app, '_search_all_active', False))
+        selected_site = getattr(app, '_site_key', '') or gui_modern.config.site_name_from_url(current_url)
+        norm_sel_site = (selected_site or '').lower()
+        for v in video_items:
+            u = v.get('url', '')
+            cand_site = (v.get('site_name') or gui_modern.config.site_name_from_url(u) or '').lower()
+            if not is_search_all and norm_sel_site and cand_site and cand_site != norm_sel_site:
+                continue
+            candidates.append(v)
+        return candidates
+
+    scoped = collect(False)
+    assert len(scoped) == 1
+    assert scoped[0]['site_name'] == 'HanimeTV'
+
+    all_sites = collect(True)
+    assert len(all_sites) == 3
+    assert {c['site_name'] for c in all_sites} == {'HanimeTV', 'JableTV', 'MissAV'}
+
+
+def test_default_inactive_sites():
+    assert 'Hanime1' in gui_modern.config.DEFAULT_INACTIVE_SITES
+    assert 'TnaFlix' in gui_modern.config.DEFAULT_INACTIVE_SITES
+
+
+def test_inactive_sites_persistence(monkeypatch, tmp_path):
+    prefs_file = tmp_path / 'ui_prefs.json'
+    monkeypatch.setattr(gui_modern.config, '_ui_prefs_path', lambda: str(prefs_file))
+
+    # Fresh state without prefs returns default inactive sites
+    assert gui_modern.config.get_inactive_sites() == {'Hanime1', 'TnaFlix'}
+
+    # Custom setting
+    gui_modern.config.set_inactive_sites({'Hanime1'})
+    assert gui_modern.config.get_inactive_sites() == {'Hanime1'}
+
+    # Enabling all sources
+    gui_modern.config.set_inactive_sites(set())
+    assert gui_modern.config.get_inactive_sites() == set()
+
+
+def test_site_switch_from_preview_directs_to_home_page(monkeypatch):
+    class DummyApp:
+        def __init__(self):
+            self._site_key = 'SupJav'
+            self._tab_keys = ['browse', 'history', 'downloads', 'settings']
+            self._active_tab_idx = 0
+            self._browse_mode = 'preview'
+            self._active_tag_slug = 'test'
+            self._active_tag_url = 'https://test'
+            self._categories = [{'name': 'Latest', 'url': 'https://missav.ai/new'}]
+            self._selected_urls = {'https://foo'}
+            self._selected_source_subtitle_evidence = {}
+            self._entity_candidates = []
+            self._entity_site_key = ''
+            self._entity_prev_base_url = ''
+            self._entity_prev_cat = ''
+            self._entity_prev_from_preview = False
+            self._entity_prev_preview_video = None
+            self._entity_search_pending = False
+            self._categories_loaded = False
+
+        def _select_tab(self, key):
+            self._active_tab_idx = self._tab_keys.index(key)
+
+        def _set_browse_mode(self, mode):
+            self._browse_mode = mode
+
+        def _exit_search_all_view(self):
+            pass
+
+        def _hide_page_heading(self):
+            pass
+
+        def _update_selection_count(self):
+            pass
+
+        def _rebuild_sidebar(self):
+            pass
+
+        def _load_categories(self):
+            self._categories_loaded = True
+
+    app = DummyApp()
+    gui_modern.ModernApp._on_site_change(app, 'MissAV')
+
+    assert app._site_key == 'MissAV'
+    assert app._browse_mode == 'grid'
+    assert app._tab_keys[app._active_tab_idx] == 'browse'
+    assert app._categories_loaded is True
+
+
+def test_selection_action_buttons_dynamic_visibility():
+    class FakeWidget:
+        def __init__(self, name):
+            self.name = name
+            self.manager = ''
+            self.pack_args = None
+
+        def winfo_manager(self):
+            return self.manager
+
+        def pack(self, **kwargs):
+            self.manager = 'pack'
+            self.pack_args = kwargs
+
+        def pack_forget(self):
+            self.manager = ''
+            self.pack_args = None
+
+    class FakeVar:
+        def __init__(self, val=''):
+            self._val = val
+
+        def set(self, val):
+            self._val = val
+
+        def get(self):
+            return self._val
+
+    class DummyModernApp:
+        def __init__(self):
+            self._selected_urls = set()
+            self._add_q_btn = FakeWidget('add_q')
+            self._dl_selected_btn = FakeWidget('dl_selected')
+            self._select_menu = FakeWidget('select_menu')
+            self._select_menu.manager = 'pack'
+            self._select_menu_var = FakeVar(locales.T('select_all_btn'))
+            self._videos = [{'url': 'https://v1'}, {'url': 'https://v2'}]
+
+    app = DummyModernApp()
+
+    # 1. Initially no video cards selected: buttons should not be packed
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == ''
+    assert app._dl_selected_btn.winfo_manager() == ''
+    assert app._select_menu_var.get() == locales.T('select_all_btn')
+
+    # 2. Select 1 video card: buttons appear
+    app._selected_urls.add('https://v1')
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == 'pack'
+    assert app._dl_selected_btn.winfo_manager() == 'pack'
+    assert app._select_menu_var.get() == locales.T('select_all_btn')
+
+    # 3. Select all video cards on page: menu switches to Unselect All
+    app._selected_urls.add('https://v2')
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == 'pack'
+    assert app._dl_selected_btn.winfo_manager() == 'pack'
+    assert app._select_menu_var.get() == locales.T('unselect_all_btn')
+
+    # 4. Clear selection: buttons disappear and menu resets to Select All
+    app._selected_urls.clear()
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == ''
+    assert app._dl_selected_btn.winfo_manager() == ''
+    assert app._select_menu_var.get() == locales.T('select_all_btn')
+
+
+def test_card_options_arrangement_and_download_flow():
+    class DummyButton:
+        def __init__(self):
+            self.kwargs = {}
+
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            self.kwargs.update(kwargs)
+
+    class DummyDownloadItem:
+        def __init__(self, url, state='等待中', progress=0):
+            self.url = url
+            self.state = state
+            self.progress = progress
+
+    class DummyDownloadManager:
+        def __init__(self):
+            self.items = []
+            self._active = set()
+            self._pending = []
+
+        def get_items(self):
+            return self.items
+
+        def add_item(self, url, state='等待中', dest='download', source_subtitle_evidence=()):
+            self.items.append(DummyDownloadItem(url, state=state))
+
+        def enqueue(self, url, dest):
+            self._active.add(url)
+
+        def remove_item(self, url):
+            self.items = [i for i in self.items if i.url != url]
+            self._active.discard(url)
+            self._pending = [t for t in self._pending if getattr(t, 'url', None) != url]
+
+    class DummyModernApp:
+        def __init__(self):
+            self._dlmgr = DummyDownloadManager()
+            self._dest_var = types.SimpleNamespace(get=lambda: 'downloads')
+            self._card_check_icon = 'DUMMY_CHECK_ICON'
+            self.selected_tab = None
+            self._card_widgets = {
+                'https://jable.tv/videos/test-1/': {
+                    'dl_btn': DummyButton(),
+                    'heart_btn': DummyButton(),
+                    'sel_btn': DummyButton(),
+                    'watch_btn': DummyButton(),
+                }
+            }
+
+        _on_card_download_click = gui_modern.ModernApp._on_card_download_click
+        _update_card_download_btn = gui_modern.ModernApp._update_card_download_btn
+        _update_visible_card_download_buttons = gui_modern.ModernApp._update_visible_card_download_buttons
+
+        def _select_tab(self, tab):
+            self.selected_tab = tab
+
+    app = DummyModernApp()
+    url = 'https://jable.tv/videos/test-1/'
+    video = {'url': url, 'title': 'Test Video'}
+
+    # 1. Initial idle state for card download button
+    gui_modern.ModernApp._update_card_download_btn(app, url)
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == '⬇'
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 2. Click download on card -> adds item to dlmgr and enqueues
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert len(app._dlmgr.items) == 1
+    assert url in app._dlmgr._active
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') in ('0%', '⏳')
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 3. Click download on card while downloading -> cancels in-flight download immediately
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert len(app._dlmgr.items) == 0
+    assert url not in app._dlmgr._active
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == '⬇'
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 4. Re-enqueuing and reaching 100% progress -> changes to clean green checkmark icon
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert len(app._dlmgr.items) == 1
+    app._dlmgr.items[0].progress = '100%'
+    gui_modern.ModernApp._update_visible_card_download_buttons(app)
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('image') == app._card_check_icon
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == ''
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 5. Full completion state ('已下載') -> preserves green checkmark icon
+    app._dlmgr.items[0].state = '已下載'
+    app._dlmgr._active.clear()
+    gui_modern.ModernApp._update_visible_card_download_buttons(app)
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('image') == app._card_check_icon
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == ''
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 6. Clicking completed button redirects to download tab
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert app.selected_tab == 'download'
+
+
+def test_card_borderless_icons_and_heroicon_bookmark(monkeypatch):
+    class DummyButton:
+        def __init__(self):
+            self.kwargs = {}
+
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            self.kwargs.update(kwargs)
+
+    # Verify Heroicon vector renderer at default size 16 and explicit size 16
+    img_outline_def = ui_theme.render_heroicon('bookmark')
+    assert img_outline_def.size == (16, 16)
+    img_outline = ui_theme.render_heroicon('bookmark', size=16)
+    assert img_outline.size == (16, 16)
+    img_solid = ui_theme.render_heroicon('bookmark_solid', size=16)
+    assert img_solid.size == (16, 16)
+    img_dl = ui_theme.render_heroicon('download', size=16)
+    assert img_dl.size == (16, 16)
+    img_check = ui_theme.render_heroicon('check', size=16)
+    assert img_check.size == (16, 16)
+
+    # Verify both bookmark and download icons have equal outer width (16px)
+    bb_b = img_outline.split()[-1].getbbox()
+    bb_dl = img_dl.split()[-1].getbbox()
+    assert (bb_b[2] - bb_b[0]) == (bb_dl[2] - bb_dl[0]) == 16
+
+    ctk_bookmark = ui_theme.get_heroicon_image('bookmark', size=16)
+    ctk_bookmark_solid = ui_theme.get_heroicon_image('bookmark_solid', size=16)
+    ctk_dl = ui_theme.get_heroicon_image('download', size=16)
+    ctk_check = ui_theme.get_heroicon_image('check', size=16)
+    assert ctk_bookmark is not None
+    assert ctk_bookmark_solid is not None
+    assert ctk_dl is not None
+    assert ctk_check is not None
+
+    class DummyModernApp:
+        def __init__(self):
+            self._heart_icon = ctk_bookmark
+            self._heart_active_icon = ctk_bookmark_solid
+            self._card_dl_icon = ctk_dl
+            self._card_check_icon = ctk_check
+            self._card_widgets = {
+                'https://test/1': {
+                    'heart_btn': DummyButton(),
+                    'dl_btn': DummyButton(),
+                }
+            }
+
+        _update_card_heart_btn = gui_modern.ModernApp._update_card_heart_btn
+        _update_card_download_btn = gui_modern.ModernApp._update_card_download_btn
+
+    app = DummyModernApp()
+    url = 'https://test/1'
+
+    # Unsaved state: no border, no background, hover disabled
+    import config
+    monkeypatch.setattr(config, 'is_video_saved', lambda u: False)
+    gui_modern.ModernApp._update_card_heart_btn(app, url, animate=False)
+    heart_btn = app._card_widgets[url]['heart_btn']
+    assert heart_btn.kwargs.get('border_width') == 0
+    assert heart_btn.kwargs.get('fg_color') == 'transparent'
+    assert heart_btn.kwargs.get('hover') is False
+    assert heart_btn.kwargs.get('image') == ctk_bookmark
+
+    # Saved state: no border, no background, hover disabled
+    monkeypatch.setattr(config, 'is_video_saved', lambda u: True)
+    gui_modern.ModernApp._update_card_heart_btn(app, url, animate=False)
+    assert heart_btn.kwargs.get('border_width') == 0
+    assert heart_btn.kwargs.get('fg_color') == 'transparent'
+    assert heart_btn.kwargs.get('hover') is False
+    assert heart_btn.kwargs.get('image') == ctk_bookmark_solid
+
+    # Download button: idle state displays download icon
+    gui_modern.ModernApp._update_card_download_btn(app, url)
+    dl_btn = app._card_widgets[url]['dl_btn']
+    assert dl_btn.kwargs.get('border_width') == 0
+    assert dl_btn.kwargs.get('fg_color') == 'transparent'
+    assert dl_btn.kwargs.get('hover') is False
+    assert dl_btn.kwargs.get('image') == ctk_dl
+
+    # Download button: completed state displays clean green checkmark icon
+    class DummyItem:
+        state = '已下載'
+        progress = '100%'
+        url = 'https://test/1'
+    app._dlmgr = types.SimpleNamespace(get_items=lambda: [DummyItem()], _active=set(), _pending=[])
+    gui_modern.ModernApp._update_card_download_btn(app, url)
+    assert dl_btn.kwargs.get('border_width') == 0
+    assert dl_btn.kwargs.get('fg_color') == 'transparent'
+    assert dl_btn.kwargs.get('hover') is False
+
+def test_render_heroicon_refresh_and_star():
+    for kind in ('refresh', 'arrow_path', 'star', 'star_solid', 'star_outline'):
+        im = ui_theme.render_heroicon(kind, size=16)
+        assert im.size == (16, 16)
+
+
+def test_status_bar_tag_heading_styling_and_actions(monkeypatch):
+    import config
+
+    class DummyWidget:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = dict(kwargs)
+            self._mapped = False
+            self.pack_calls = []
+
+        def pack(self, *args, **kwargs):
+            self.pack_calls.append(kwargs)
+            self._mapped = True
+
+        def pack_forget(self):
+            self._mapped = False
+
+        def configure(self, **kwargs):
+            self.kwargs.update(kwargs)
+
+        def winfo_ismapped(self):
+            return self._mapped
+
+        def bind(self, *args, **kwargs):
+            pass
+
+    app = types.SimpleNamespace()
+    status_bar = DummyWidget()
+    app._status_bar = status_bar
+    app._status_lbl = DummyWidget()
+    app._status_lbl.pack(side='left', padx=16)
+    app._refresh_icon = 'mock_refresh_icon'
+    app._refresh_icon_hover = 'mock_refresh_hover'
+    app._ENTITY_LABELS = {'tag': 'Tag', 'actress': 'Actress'}
+    app._site_key = 'JableTV'
+    app._refresh_entity_heading = lambda: gui_modern.ModernApp._refresh_entity_heading(app)
+    app._update_heading_star_state = lambda is_starred: gui_modern.ModernApp._update_heading_star_state(app, is_starred)
+
+    heading = DummyWidget()
+    heading.kwargs = {'fg_color': 'transparent', 'border_width': 0}
+    app._page_heading = heading
+
+    close_btn = DummyWidget()
+    close_btn.kwargs = {'border_width': 0, 'fg_color': 'transparent', 'hover': False}
+    app._page_heading_close = close_btn
+
+    star_btn = DummyWidget()
+    star_btn.kwargs = {'border_width': 0, 'fg_color': 'transparent', 'hover': False, 'text': '☆'}
+    app._page_heading_star = star_btn
+
+    ref_btn = DummyWidget()
+    ref_btn.kwargs = {'border_width': 0, 'fg_color': 'transparent', 'hover': False, 'image': app._refresh_icon}
+    app._page_heading_refresh = ref_btn
+
+    lbl = DummyWidget()
+    app._page_heading_lbl = lbl
+    sep = DummyWidget()
+    app._page_heading_sep = sep
+
+    # Verify initial styling meets zero border & zero background requirements
+    assert close_btn.kwargs.get('border_width') == 0
+    assert close_btn.kwargs.get('fg_color') == 'transparent'
+    assert close_btn.kwargs.get('hover') is False
+
+    assert star_btn.kwargs.get('border_width') == 0
+    assert star_btn.kwargs.get('fg_color') == 'transparent'
+    assert star_btn.kwargs.get('hover') is False
+
+    assert ref_btn.kwargs.get('border_width') == 0
+    assert ref_btn.kwargs.get('fg_color') == 'transparent'
+    assert ref_btn.kwargs.get('hover') is False
+    assert ref_btn.kwargs.get('image') == 'mock_refresh_icon'
+
+    # Show tag heading
+    gui_modern.ModernApp._show_page_heading(app, 'tag', 'Big Tits')
+    assert heading.winfo_ismapped() is True
+    assert 'Big Tits' in lbl.kwargs.get('text', '')
+    # Check that heading was packed before status_lbl on status_bar
+    last_pack = heading.pack_calls[-1]
+    assert last_pack.get('side') == 'left'
+    assert last_pack.get('before') == app._status_lbl
+
+    # Toggle star favorite
+    fav_state = [False]
+    monkeypatch.setattr(config, 'is_tag_favorite', lambda name, kind='tag': fav_state[0])
+    def dummy_toggle(name, kind='tag'):
+        fav_state[0] = not fav_state[0]
+        return fav_state[0]
+    monkeypatch.setattr(config, 'toggle_favorite_tag', dummy_toggle)
+
+    gui_modern.ModernApp._toggle_current_entity_star(app)
+    assert star_btn.kwargs.get('text') == '★'
+    gui_modern.ModernApp._toggle_current_entity_star(app)
+    assert star_btn.kwargs.get('text') == '☆'
+
+    # Hide heading (back to normal browsing)
+    gui_modern.ModernApp._hide_page_heading(app)
+    assert heading.winfo_ismapped() is False
+
+
+
+
+
+
+
