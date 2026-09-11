@@ -174,7 +174,14 @@ class VideoOCRExtractor:
                 import easyocr
                 import numpy as np
                 if self._easy_ocr_reader is None:
-                    langs = ['ch_tra', 'en'] if 'zh' in lang else (['ja', 'en'] if 'ja' in lang else ['en'])
+                    if 'zh' in lang:
+                        langs = ['ch_tra', 'en']
+                    elif 'ja' in lang:
+                        langs = ['ja', 'en']
+                    elif 'ko' in lang:
+                        langs = ['ko', 'en']
+                    else:
+                        langs = ['en']
                     self._easy_ocr_reader = easyocr.Reader(langs, gpu=False)
                 results = self._easy_ocr_reader.readtext(np.array(image.convert('RGB')))
                 texts = [res[1] for res in results if res[2] > 0.32]
@@ -190,6 +197,8 @@ class VideoOCRExtractor:
                     tess_lang = 'chi_tra+chi_sim+eng'
                 elif 'ja' in lang:
                     tess_lang = 'jpn+eng'
+                elif 'ko' in lang:
+                    tess_lang = 'kor+eng'
                 else:
                     tess_lang = 'eng'
                 text = pytesseract.image_to_string(image, lang=tess_lang, config='--psm 6')
@@ -412,7 +421,14 @@ def extract_subtitles_via_ocr(
     """Convenience helper to extract hardcoded subtitles from a video file into an SRT file."""
     if not output_srt_path:
         base, _ = os.path.splitext(video_path)
-        output_srt_path = f"{base}.zh-TW.srt" if 'zh' in lang else f"{base}.srt"
+        if 'zh' in lang:
+            output_srt_path = f"{base}.zh-TW.srt"
+        elif 'ko' in lang:
+            output_srt_path = f"{base}.ko.srt"
+        elif 'ja' in lang:
+            output_srt_path = f"{base}.ja.srt"
+        else:
+            output_srt_path = f"{base}.srt"
 
     extractor = VideoOCRExtractor(
         fps=fps,

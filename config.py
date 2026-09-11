@@ -43,6 +43,8 @@ _proxy_url_cache = _PROXY_UNSET
 _proxy_mode_cache = _PROXY_UNSET
 _system_proxy_cache = _PROXY_UNSET
 CF_OVERRIDES = {}
+_saved_urls_cache = None
+_saved_cache_lock = threading.Lock()
 VALID_RESOLUTION_PREFS = {'highest', 'lowest', '1080', '720', '480', '360'}
 VALID_SUBTITLE_PREFS = {'none', 'ja', 'en', 'zh', 'all'}
 VALID_RECOGNITION_QUALITIES = {'auto', 'quality', 'balanced', 'fast'}
@@ -145,14 +147,14 @@ def get_ui_lang():
     code = _load_prefs().get('lang')
     if isinstance(code, str):
         code = code.strip()
-        if code in {'en', 'zh', 'zh-Hans', 'ja'}:
+        if code in {'en', 'zh', 'zh-Hans', 'ja', 'ko'}:
             return code
     return None
 
 
 def set_ui_lang(code):
     code = (code or '').strip()
-    if code not in {'en', 'zh', 'zh-Hans', 'ja'}:
+    if code not in {'en', 'zh', 'zh-Hans', 'ja', 'ko'}:
         code = 'en'
     try:
         with _prefs_lock:
@@ -756,8 +758,31 @@ def is_video_saved(url):
     url = (url or '').strip()
     if not url:
         return False
-    saved = get_saved_videos()
-    return any(isinstance(item, dict) and item.get('url') == url for item in saved)
+    return url in get_saved_urls_set()
+
+
+def _invalidate_saved_cache():
+    global _saved_urls_cache
+    _saved_urls_cache = None
+
+
+def get_saved_urls_set():
+    """Return a set of saved video URLs from a single prefs load.
+
+    Results are cached in memory and only refreshed after the list is
+    mutated, so repeated per-card lookups avoid a JSON file read each time.
+    """
+    global _saved_urls_cache
+    with _saved_cache_lock:
+        if _saved_urls_cache is None:
+            result = set()
+            for item in get_saved_videos():
+                if isinstance(item, dict):
+                    url = item.get('url')
+                    if url:
+                        result.add(url)
+            _saved_urls_cache = result
+        return _saved_urls_cache
 
 
 def add_saved_video(video_info: dict):
@@ -790,6 +815,7 @@ def add_saved_video(video_info: dict):
                 saved.insert(0, entry)
             prefs['saved_videos'] = saved
             _save_prefs(prefs)
+            _invalidate_saved_cache()
             return True
     except Exception:
         return False
@@ -808,6 +834,7 @@ def remove_saved_video(url: str):
             new_saved = [item for item in saved if isinstance(item, dict) and item.get('url') != url]
             prefs['saved_videos'] = new_saved
             _save_prefs(prefs)
+            _invalidate_saved_cache()
             return True
     except Exception:
         return False
@@ -831,6 +858,7 @@ def clear_saved_videos():
             prefs = _load_prefs()
             prefs['saved_videos'] = []
             _save_prefs(prefs)
+            _invalidate_saved_cache()
     except Exception:
         pass
 
@@ -889,6 +917,7 @@ def import_saved_videos(filepath: str) -> int:
             if added:
                 prefs['saved_videos'] = saved
                 _save_prefs(prefs)
+                _invalidate_saved_cache()
             return added
     except Exception:
         return 0
@@ -1024,129 +1053,51 @@ def remove_download_history(url):
         pass
 
 
-def get_watchlist():
+def get_favorite_tags():
+    """Return a set of favorite tag/actress/entity names."""
     try:
         with _prefs_lock:
-            items = _load_prefs().get('watchlist', [])
-            return list(items) if isinstance(items, list) else []
-    except Exception:
-        return []
-
-
-def set_watchlist(items):
-    try:
-        with _prefs_lock:
-            prefs = _load_prefs()
-            prefs['watchlist'] = list(items) if isinstance(items, list) else []
-            _save_prefs(prefs)
+            val = _load_prefs().get('favorite_tags', [])
+            if isinstance(val, (list, tuple, set)):
+                return {str(x).strip().lower() for x in val if str(x).strip()}
     except Exception:
         pass
+    return set()
 
 
-def add_watchlist_item(item):
-    if not isinstance(item, dict):
-        return False
-    name = (item.get('name') or '').strip()
+def is_tag_favorite(name, kind='tag'):
     if not name:
         return False
+    favs = get_favorite_tags()
+    return str(name).strip().lower() in favs
+
+
+def toggle_favorite_tag(name, kind='tag'):
+    """Toggle a tag/actress in favorites, returning True if now favorited, False if removed."""
+    clean = str(name or '').strip()
+    if not clean:
+        return False
+    clean_lower = clean.lower()
     try:
         with _prefs_lock:
             prefs = _load_prefs()
-            wl = prefs.get('watchlist', [])
-            if not isinstance(wl, list):
-                wl = []
-            # Avoid duplicate names under same type
-            item_type = item.get('type', 'actress')
-            for existing in wl:
-                if isinstance(existing, dict) and existing.get('name', '').lower() == name.lower() and existing.get('type') == item_type:
-                    return False
-            wl.append(item)
-            prefs['watchlist'] = wl
+            val = prefs.get('favorite_tags', [])
+            fav_set = {str(x).strip() for x in val if str(x).strip()} if isinstance(val, (list, tuple, set)) else set()
+            fav_map = {x.lower(): x for x in fav_set}
+            if clean_lower in fav_map:
+                fav_set.discard(fav_map[clean_lower])
+                is_fav = False
+            else:
+                fav_set.add(clean)
+                is_fav = True
+            prefs['favorite_tags'] = sorted(list(fav_set))
             _save_prefs(prefs)
-            return True
+            return is_fav
     except Exception:
         return False
 
 
-def remove_watchlist_item(name, item_type=None):
-    try:
-        with _prefs_lock:
-            prefs = _load_prefs()
-            wl = prefs.get('watchlist', [])
-            if not isinstance(wl, list):
-                return False
-            filtered = []
-            removed = False
-            for item in wl:
-                if isinstance(item, dict):
-                    match_name = item.get('name', '').lower() == str(name).lower()
-                    match_type = True if item_type is None else item.get('type') == item_type
-                    if match_name and match_type:
-                        removed = True
-                        continue
-                filtered.append(item)
-            if removed:
-                prefs['watchlist'] = filtered
-                _save_prefs(prefs)
-            return removed
-    except Exception:
-        return False
-
-
-def is_in_watchlist(name: str, item_type: Optional[str] = None) -> bool:
-    if not name:
-        return False
-    try:
-        with _prefs_lock:
-            wl = _load_prefs().get('watchlist', [])
-            if not isinstance(wl, list):
-                return False
-            name_clean = str(name).strip().lower()
-            for it in wl:
-                if isinstance(it, dict) and it.get('name', '').strip().lower() == name_clean:
-                    if item_type is None or it.get('type') == item_type:
-                        return True
-            return False
-    except Exception:
-        return False
-
-
-def toggle_watchlist_item(name: str, item_type: str = 'actress', site: str = 'All') -> bool:
-    """Toggles item in watchlist. Returns True if now in watchlist, False if removed."""
-    if not name:
-        return False
-    if is_in_watchlist(name, item_type):
-        remove_watchlist_item(name, item_type)
-        return False
-    else:
-        add_watchlist_item({
-            'name': name.strip(),
-            'type': item_type,
-            'site': site,
-            'auto_download': get_watchlist_auto_download()
-        })
-        return True
-
-
-def get_watchlist_auto_download() -> bool:
-    try:
-        with _prefs_lock:
-            return bool(_load_prefs().get('watchlist_auto_download', False))
-    except Exception:
-        return False
-
-
-def set_watchlist_auto_download(enabled: bool):
-    try:
-        with _prefs_lock:
-            prefs = _load_prefs()
-            prefs['watchlist_auto_download'] = bool(enabled)
-            _save_prefs(prefs)
-    except Exception:
-        pass
-
-
-VALID_VIDEO_OCR_LANGS = {'zh', 'en', 'ja', 'auto'}
+VALID_VIDEO_OCR_LANGS = {'zh', 'en', 'ja', 'ko', 'auto'}
 VALID_VIDEO_OCR_BACKENDS = {'auto', 'rapidocr', 'win_native', 'easyocr', 'pytesseract'}
 VALID_VIDEO_OCR_MODES = {'on_hardcoded_detected', 'always', 'manual_only'}
 

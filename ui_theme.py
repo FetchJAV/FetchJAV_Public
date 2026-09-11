@@ -34,6 +34,8 @@ TEXT_LINK = ('#E63946', '#FF4D6D')
 BORDER = ('#E1DDD7', '#25252C')
 BORDER_HOVER = ('#CEC8C0', '#3A3944')
 BORDER_CARD = ('#E6E1DA', '#22222A')
+WINDOW_BORDER = ('#D0CCC4', '#3E3D4B')
+WINDOW_SHADOW = ('#EAE6DF', '#1C1B24')
 
 WHITE = ('#FFFFFF', '#FFFFFF')
 CARD_RADIUS = 10
@@ -237,5 +239,173 @@ def patch_ctk_option_menu_theme():
 
 
 patch_ctk_option_menu_theme()
+
+
+# ==============================================================================
+# Heroicons Vector Engine (4x Supersampling with Lanczos Filter)
+# ==============================================================================
+
+_HEROICON_CACHE = {}
+
+
+def render_heroicon(kind: str, size: int = 16, color='#FF4D6D', stroke_width: float = 1.5):
+    """Renders an authentic Heroicons v2 24x24 icon at 4x supersampling with Lanczos resampling.
+    Supports:
+      - 'bookmark' (outline): exact Heroicons v2 outline bookmark
+      - 'bookmark_solid' / 'bookmark_fill': exact Heroicons v2 solid bookmark
+      - 'download' / 'arrow_down_tray': clean Heroicons v2 download arrow
+      - 'check': checkmark
+    Returns a PIL.Image.Image.
+    """
+    key = (kind, size, color, stroke_width)
+    if key in _HEROICON_CACHE:
+        return _HEROICON_CACHE[key]
+
+    from PIL import Image, ImageDraw
+
+    scale = 4
+    canvas_size = size * scale
+    img = Image.new('RGBA', (canvas_size, canvas_size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    s = canvas_size / 24.0
+    sw = max(1.0, stroke_width * s)
+
+    def pt(x, y):
+        return (x * s, y * s)
+
+    def draw_lines(points, width=sw, close=False):
+        pts = [pt(x, y) for x, y in points]
+        if close and pts[0] != pts[-1]:
+            pts.append(pts[0])
+        for i in range(len(pts) - 1):
+            draw.line([pts[i], pts[i+1]], fill=color, width=int(round(width)), joint='curve')
+            r = width / 2.0
+            draw.ellipse([pts[i][0]-r, pts[i][1]-r, pts[i][0]+r, pts[i][1]+r], fill=color)
+        r = width / 2.0
+        draw.ellipse([pts[-1][0]-r, pts[-1][1]-r, pts[-1][0]+r, pts[-1][1]+r], fill=color)
+
+    def draw_polygon(points, fill=color):
+        pts = [pt(x, y) for x, y in points]
+        draw.polygon(pts, fill=fill)
+
+    # Exact Heroicons v2 24x24 Bookmark coordinates from SVG path:
+    # <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+    bookmark_pts = [
+        (4.5, 21.0),
+        (4.5, 5.507),
+        (4.565, 4.969),
+        (4.75, 4.477),
+        (5.041, 4.047),
+        (5.423, 3.699),
+        (5.883, 3.451),
+        (6.407, 3.322),
+        (12.0, 3.15),
+        (17.593, 3.322),
+        (18.116, 3.451),
+        (18.576, 3.699),
+        (18.959, 4.047),
+        (19.25, 4.477),
+        (19.435, 4.969),
+        (19.5, 5.507),
+        (19.5, 21.0),
+        (12.0, 17.25),
+        (4.5, 21.0),
+    ]
+
+    if kind in ('bookmark', 'bookmark_outline', 'save'):
+        draw_lines(bookmark_pts, width=sw, close=True)
+    elif kind in ('bookmark_solid', 'bookmark_fill', 'saved', 'save_solid'):
+        draw_polygon(bookmark_pts[:-1], fill=color)
+    elif kind in ('download', 'arrow_down_tray'):
+        draw_lines([(12.0, 3.5), (12.0, 16.2)], width=sw)
+        draw_lines([(7.5, 11.7), (12.0, 16.2), (16.5, 11.7)], width=sw)
+        tray_pts = [
+            (3.8, 15.5),
+            (3.8, 18.5),
+            (4.4, 19.8),
+            (5.5, 20.5),
+            (18.5, 20.5),
+            (19.6, 19.8),
+            (20.2, 18.5),
+            (20.2, 15.5),
+        ]
+        draw_lines(tray_pts, width=sw)
+    elif kind in ('check', 'checkmark'):
+        draw_lines([(3.5, 12.5), (9.0, 18.0), (20.5, 6.0)], width=sw * 1.25)
+    elif kind in ('refresh', 'reload', 'arrow_path'):
+        draw.arc([pt(4.5, 4.5), pt(19.5, 19.5)], start=210, end=40, fill=color, width=int(round(sw)))
+        draw.arc([pt(4.5, 4.5), pt(19.5, 19.5)], start=30, end=220, fill=color, width=int(round(sw)))
+        draw_lines([(17.5, 2.5), (20.5, 5.5), (17.5, 8.5)], width=sw)
+        draw_lines([(6.5, 21.5), (3.5, 18.5), (6.5, 15.5)], width=sw)
+    elif kind in ('star', 'star_solid'):
+        star_pts = [
+            (12.0, 2.5), (14.9, 8.5), (21.5, 9.4), (16.7, 14.1),
+            (17.8, 20.6), (12.0, 17.5), (6.2, 20.6), (7.3, 14.1),
+            (2.5, 9.4), (9.1, 8.5)
+        ]
+        draw_polygon(star_pts, fill=color)
+    elif kind in ('star_outline',):
+        star_pts = [
+            (12.0, 2.5), (14.9, 8.5), (21.5, 9.4), (16.7, 14.1),
+            (17.8, 20.6), (12.0, 17.5), (6.2, 20.6), (7.3, 14.1),
+            (2.5, 9.4), (9.1, 8.5)
+        ]
+        draw_lines(star_pts, width=sw, close=True)
+    else:
+        r = 4.0 * s
+        draw.ellipse([pt(12 - r, 12 - r), pt(12 + r, 12 + r)], fill=color)
+
+    out = img.resize((size, size), Image.Resampling.LANCZOS)
+    _HEROICON_CACHE[key] = out
+    return out
+
+
+_CTK_HEROICON_CACHE = {}
+
+
+def get_heroicon_image(kind: str, size: int = 16, color=None, stroke_width: float = 1.5, source_size: int = None):
+    """Returns a ctk.CTkImage for `kind` ('bookmark', 'bookmark_solid', 'download', 'check').
+    If color is not specified, defaults to appropriate theme colors (TEXT_PRI / ACCENT / vibrant green SUCCESS).
+
+    `size` is the logical display size in points. CustomTkinter renders the image at
+    ``size * widget_scaling`` on high-DPI displays, so the icon is drawn at a higher native
+    resolution (`source_size`, default ``size * 4``) to keep it sharp when scaled down.
+    """
+    if source_size is None:
+        source_size = max(size * 4, 64)
+    key = (kind, size, tuple(color) if isinstance(color, (tuple, list)) else color, stroke_width, source_size)
+    if key in _CTK_HEROICON_CACHE:
+        return _CTK_HEROICON_CACHE[key]
+
+    try:
+        import customtkinter as ctk
+    except ImportError:
+        return None
+
+    if color is None:
+        if kind in ('bookmark_solid', 'bookmark_fill', 'saved', 'save_solid'):
+            light_c = ACCENT[0]
+            dark_c = ACCENT[1]
+        elif kind in ('check', 'checkmark'):
+            light_c = '#16a34a'
+            dark_c = '#22c55e'
+        else:
+            light_c = TEXT_PRI[0]
+            dark_c = TEXT_PRI[1]
+    elif isinstance(color, (tuple, list)):
+        light_c = color[0]
+        dark_c = color[1] if len(color) > 1 else color[0]
+    else:
+        light_c = color
+        dark_c = color
+
+    im_light = render_heroicon(kind, size=source_size, color=light_c, stroke_width=stroke_width)
+    im_dark = render_heroicon(kind, size=source_size, color=dark_c, stroke_width=stroke_width)
+
+    ctk_img = ctk.CTkImage(light_image=im_light, dark_image=im_dark, size=(size, size))
+    _CTK_HEROICON_CACHE[key] = ctk_img
+    return ctk_img
+
 
 

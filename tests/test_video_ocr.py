@@ -74,6 +74,8 @@ def test_ocr_config_preferences():
     assert config.get_video_ocr_lang() == 'zh'
     config.set_video_ocr_lang('en')
     assert config.get_video_ocr_lang() == 'en'
+    config.set_video_ocr_lang('ko')
+    assert config.get_video_ocr_lang() == 'ko'
     config.set_video_ocr_lang('invalid_lang')
     assert config.get_video_ocr_lang() == 'zh'
 

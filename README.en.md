@@ -123,11 +123,6 @@ Extract burnt-in subtitles directly from video frames into standard `.srt` subti
 
 ---
 
-### 11. Actress & Studio Watchlist with Desktop Notifications
-Follow your favorite AV idols, performers, and studios. FetchJAV automatically monitors new releases across supported sites with unread badge indicators, desktop toast notifications, and 1-click batch download queuing.
-
----
-
 ## 🚀 Windows: Quick Start in 30 Seconds
 
 1. **Download**: Get the latest **[FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe)**.

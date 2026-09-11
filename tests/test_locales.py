@@ -36,7 +36,7 @@ import locales
 from M3U8Sites.SiteMissAV import MissAVBrowser
 
 
-LANGS = ['en', 'zh', 'zh-Hans', 'ja']
+LANGS = ['en', 'zh', 'zh-Hans', 'ja', 'ko']
 PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
 
 
@@ -69,6 +69,7 @@ def test_add_to_queue_locale_key_present():
         'zh': '加入清單',
         'zh-Hans': '加入清单',
         'ja': 'キューに追加',
+        'ko': '대기열에 추가',
     }
     for lang, text in expected.items():
         assert locales.STRINGS[lang]['add_to_queue'] == text
@@ -89,6 +90,9 @@ def test_ui_font_tracks_current_language():
     locales.set_lang('ja')
     assert locales.ui_font() == 'Yu Gothic UI'
 
+    locales.set_lang('ko')
+    assert locales.ui_font() == 'Malgun Gothic'
+
     locales.set_lang('en')
     assert locales.ui_font() == 'Microsoft JhengHei'
 
@@ -100,6 +104,9 @@ def test_state_label_translates_known_codes_and_keeps_unknown_codes():
     locales.set_lang('ja')
     assert locales.state_label('已下載') == '完了'
     assert locales.state_label('未知狀態') == '未知狀態'
+
+    locales.set_lang('ko')
+    assert locales.state_label('已下載') == '완료'
 
 
 def test_recognition_quality_and_no_speech_copy_is_complete():
@@ -129,6 +136,10 @@ def test_recognition_quality_and_no_speech_copy_is_complete():
     assert locales.T('subtitle_no_speech') == '未偵測到日語語音'
     assert locales.state_label('未偵測到日語語音') == '未偵測到日語語音'
 
+    locales.set_lang('ko')
+    assert locales.T('subtitle_no_speech') == '일본어 음성을 감지하지 못했습니다'
+    assert locales.state_label('未偵測到日語語音') == '일본어 음성을 감지하지 못했습니다'
+
 
 def test_site_language_codes():
     expected = {
@@ -136,6 +147,7 @@ def test_site_language_codes():
         'zh': ('', 'zh'),
         'zh-Hans': ('cn', 'zh'),
         'ja': ('ja', 'ja'),
+        'ko': ('ko', ''),
     }
     for lang, (missav_lang, supjav_lang) in expected.items():
         locales.set_lang(lang)
@@ -148,15 +160,15 @@ def test_config_prefs_keep_theme_and_language(tmp_path, monkeypatch):
     monkeypatch.setattr(config, '_ui_prefs_path', lambda: str(path))
 
     config.set_theme('dark')
-    config.set_ui_lang('ja')
+    config.set_ui_lang('ko')
 
     assert config.get_theme() == 'dark'
-    assert config.get_ui_lang() == 'ja'
+    assert config.get_ui_lang() == 'ko'
 
     config.set_theme('light')
 
     assert config.get_theme() == 'light'
-    assert config.get_ui_lang() == 'ja'
+    assert config.get_ui_lang() == 'ko'
 
 
 def test_missav_language_paths_use_empty_string_for_default(monkeypatch):

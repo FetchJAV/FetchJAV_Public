@@ -56,7 +56,7 @@ def test_primary_text_contrast_is_accessible_in_both_themes():
 
 
 def test_current_version_and_global_smalltool_copy_are_complete():
-    assert gui_modern.APP_VERSION == jable_smalltool.APP_VERSION == '0.1.10'
+    assert gui_modern.APP_VERSION == jable_smalltool.APP_VERSION == '0.1.11'
     required = {
         'st_activity', 'st_progress_idle', 'st_footer_short',
         'st_categories_expand', 'st_categories_collapse',
@@ -78,7 +78,7 @@ def test_current_version_and_global_smalltool_copy_are_complete():
         'st_scan_queued', 'st_waiting_schedule', 'st_stopping',
     }
     for language, strings in locales.STRINGS.items():
-        assert strings['version_label'] == 'v0.1.10', language
+        assert strings['version_label'] == 'v0.1.11', language
         assert required <= strings.keys(), language
 
 
@@ -86,14 +86,14 @@ def test_windows_version_resources_match_app_version():
     root = Path(__file__).resolve().parents[1]
     workflow = (root / '.github' / 'workflows' / 'windows-build.yml').read_text(
         encoding='utf-8')
-    assert '$expected = "0.1.10.0"' in workflow
+    assert '$expected = "0.1.11.0"' in workflow
     generator = (root / 'build_tmp' / 'gen_version.py').read_text(
         encoding='utf-8')
-    assert 'VERSION = (0, 1, 10, 0)' in generator
+    assert 'VERSION = (0, 1, 11, 0)' in generator
     for name in ('JableTV_Modern.version', 'Jable_smalltool.version'):
         resource = (root / 'build_tmp' / name).read_text(encoding='utf-8')
-        assert 'filevers=(0, 1, 10, 0)' in resource
-        assert "StringStruct('FileVersion', '0.1.10.0')" in resource
+        assert 'filevers=(0, 1, 11, 0)' in resource
+        assert "StringStruct('FileVersion', '0.1.11.0')" in resource
     for name in ('JableTV_Modern.spec', 'Jable_smalltool.spec'):
         spec = (root / 'build_tmp' / name).read_text(encoding='utf-8')
         assert "'numpy._core._exceptions'" in spec
@@ -201,15 +201,18 @@ def test_modern_defers_initial_workers_until_mainloop():
 
     app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
     calls = []
+    scheduled = []
     app._is_closing = False
     app._start_update_check = lambda **kwargs: calls.append(('update', kwargs))
     app._load_categories = lambda: calls.append(('categories', {}))
     app._start_banner_fetch = lambda: calls.append(('banner', {}))
+    app.after = lambda delay_ms, fn: scheduled.append((delay_ms, fn))
 
     app._start_initial_background_tasks()
 
-    assert calls == [('update', {'manual': False}), ('categories', {}),
-                     ('banner', {})]
+    assert calls == [('update', {'manual': False})]
+    assert scheduled == [(400, app._load_categories),
+                         (800, app._start_banner_fetch)]
 
 
 def test_banner_module_validates_and_caches():
@@ -871,6 +874,380 @@ def test_site_switch_from_preview_directs_to_home_page(monkeypatch):
     assert app._browse_mode == 'grid'
     assert app._tab_keys[app._active_tab_idx] == 'browse'
     assert app._categories_loaded is True
+
+
+def test_selection_action_buttons_dynamic_visibility():
+    class FakeWidget:
+        def __init__(self, name):
+            self.name = name
+            self.manager = ''
+            self.pack_args = None
+
+        def winfo_manager(self):
+            return self.manager
+
+        def pack(self, **kwargs):
+            self.manager = 'pack'
+            self.pack_args = kwargs
+
+        def pack_forget(self):
+            self.manager = ''
+            self.pack_args = None
+
+    class FakeVar:
+        def __init__(self, val=''):
+            self._val = val
+
+        def set(self, val):
+            self._val = val
+
+        def get(self):
+            return self._val
+
+    class DummyModernApp:
+        def __init__(self):
+            self._selected_urls = set()
+            self._add_q_btn = FakeWidget('add_q')
+            self._dl_selected_btn = FakeWidget('dl_selected')
+            self._select_menu = FakeWidget('select_menu')
+            self._select_menu.manager = 'pack'
+            self._select_menu_var = FakeVar(locales.T('select_all_btn'))
+            self._videos = [{'url': 'https://v1'}, {'url': 'https://v2'}]
+
+    app = DummyModernApp()
+
+    # 1. Initially no video cards selected: buttons should not be packed
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == ''
+    assert app._dl_selected_btn.winfo_manager() == ''
+    assert app._select_menu_var.get() == locales.T('select_all_btn')
+
+    # 2. Select 1 video card: buttons appear
+    app._selected_urls.add('https://v1')
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == 'pack'
+    assert app._dl_selected_btn.winfo_manager() == 'pack'
+    assert app._select_menu_var.get() == locales.T('select_all_btn')
+
+    # 3. Select all video cards on page: menu switches to Unselect All
+    app._selected_urls.add('https://v2')
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == 'pack'
+    assert app._dl_selected_btn.winfo_manager() == 'pack'
+    assert app._select_menu_var.get() == locales.T('unselect_all_btn')
+
+    # 4. Clear selection: buttons disappear and menu resets to Select All
+    app._selected_urls.clear()
+    gui_modern.ModernApp._update_selection_count(app)
+    assert app._add_q_btn.winfo_manager() == ''
+    assert app._dl_selected_btn.winfo_manager() == ''
+    assert app._select_menu_var.get() == locales.T('select_all_btn')
+
+
+def test_card_options_arrangement_and_download_flow():
+    class DummyButton:
+        def __init__(self):
+            self.kwargs = {}
+
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            self.kwargs.update(kwargs)
+
+    class DummyDownloadItem:
+        def __init__(self, url, state='等待中', progress=0):
+            self.url = url
+            self.state = state
+            self.progress = progress
+
+    class DummyDownloadManager:
+        def __init__(self):
+            self.items = []
+            self._active = set()
+            self._pending = []
+
+        def get_items(self):
+            return self.items
+
+        def add_item(self, url, state='等待中', dest='download', source_subtitle_evidence=()):
+            self.items.append(DummyDownloadItem(url, state=state))
+
+        def enqueue(self, url, dest):
+            self._active.add(url)
+
+        def remove_item(self, url):
+            self.items = [i for i in self.items if i.url != url]
+            self._active.discard(url)
+            self._pending = [t for t in self._pending if getattr(t, 'url', None) != url]
+
+    class DummyModernApp:
+        def __init__(self):
+            self._dlmgr = DummyDownloadManager()
+            self._dest_var = types.SimpleNamespace(get=lambda: 'downloads')
+            self._card_check_icon = 'DUMMY_CHECK_ICON'
+            self.selected_tab = None
+            self._card_widgets = {
+                'https://jable.tv/videos/test-1/': {
+                    'dl_btn': DummyButton(),
+                    'heart_btn': DummyButton(),
+                    'sel_btn': DummyButton(),
+                    'watch_btn': DummyButton(),
+                }
+            }
+
+        _on_card_download_click = gui_modern.ModernApp._on_card_download_click
+        _update_card_download_btn = gui_modern.ModernApp._update_card_download_btn
+        _update_visible_card_download_buttons = gui_modern.ModernApp._update_visible_card_download_buttons
+
+        def _select_tab(self, tab):
+            self.selected_tab = tab
+
+    app = DummyModernApp()
+    url = 'https://jable.tv/videos/test-1/'
+    video = {'url': url, 'title': 'Test Video'}
+
+    # 1. Initial idle state for card download button
+    gui_modern.ModernApp._update_card_download_btn(app, url)
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == '⬇'
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 2. Click download on card -> adds item to dlmgr and enqueues
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert len(app._dlmgr.items) == 1
+    assert url in app._dlmgr._active
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') in ('0%', '⏳')
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 3. Click download on card while downloading -> cancels in-flight download immediately
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert len(app._dlmgr.items) == 0
+    assert url not in app._dlmgr._active
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == '⬇'
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 4. Re-enqueuing and reaching 100% progress -> changes to clean green checkmark icon
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert len(app._dlmgr.items) == 1
+    app._dlmgr.items[0].progress = '100%'
+    gui_modern.ModernApp._update_visible_card_download_buttons(app)
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('image') == app._card_check_icon
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == ''
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 5. Full completion state ('已下載') -> preserves green checkmark icon
+    app._dlmgr.items[0].state = '已下載'
+    app._dlmgr._active.clear()
+    gui_modern.ModernApp._update_visible_card_download_buttons(app)
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('image') == app._card_check_icon
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('text') == ''
+    assert app._card_widgets[url]['dl_btn'].kwargs.get('border_width') == 0
+
+    # 6. Clicking completed button redirects to download tab
+    gui_modern.ModernApp._on_card_download_click(app, video, url)
+    assert app.selected_tab == 'download'
+
+
+def test_card_borderless_icons_and_heroicon_bookmark(monkeypatch):
+    class DummyButton:
+        def __init__(self):
+            self.kwargs = {}
+
+        def winfo_exists(self):
+            return True
+
+        def configure(self, **kwargs):
+            self.kwargs.update(kwargs)
+
+    # Verify Heroicon vector renderer at default size 16 and explicit size 16
+    img_outline_def = ui_theme.render_heroicon('bookmark')
+    assert img_outline_def.size == (16, 16)
+    img_outline = ui_theme.render_heroicon('bookmark', size=16)
+    assert img_outline.size == (16, 16)
+    img_solid = ui_theme.render_heroicon('bookmark_solid', size=16)
+    assert img_solid.size == (16, 16)
+    img_dl = ui_theme.render_heroicon('download', size=16)
+    assert img_dl.size == (16, 16)
+    img_check = ui_theme.render_heroicon('check', size=16)
+    assert img_check.size == (16, 16)
+
+    # Verify both bookmark and download icons have equal outer width (16px)
+    bb_b = img_outline.split()[-1].getbbox()
+    bb_dl = img_dl.split()[-1].getbbox()
+    assert (bb_b[2] - bb_b[0]) == (bb_dl[2] - bb_dl[0]) == 16
+
+    ctk_bookmark = ui_theme.get_heroicon_image('bookmark', size=16)
+    ctk_bookmark_solid = ui_theme.get_heroicon_image('bookmark_solid', size=16)
+    ctk_dl = ui_theme.get_heroicon_image('download', size=16)
+    ctk_check = ui_theme.get_heroicon_image('check', size=16)
+    assert ctk_bookmark is not None
+    assert ctk_bookmark_solid is not None
+    assert ctk_dl is not None
+    assert ctk_check is not None
+
+    class DummyModernApp:
+        def __init__(self):
+            self._heart_icon = ctk_bookmark
+            self._heart_active_icon = ctk_bookmark_solid
+            self._card_dl_icon = ctk_dl
+            self._card_check_icon = ctk_check
+            self._card_widgets = {
+                'https://test/1': {
+                    'heart_btn': DummyButton(),
+                    'dl_btn': DummyButton(),
+                }
+            }
+
+        _update_card_heart_btn = gui_modern.ModernApp._update_card_heart_btn
+        _update_card_download_btn = gui_modern.ModernApp._update_card_download_btn
+
+    app = DummyModernApp()
+    url = 'https://test/1'
+
+    # Unsaved state: no border, no background, hover disabled
+    import config
+    monkeypatch.setattr(config, 'is_video_saved', lambda u: False)
+    gui_modern.ModernApp._update_card_heart_btn(app, url, animate=False)
+    heart_btn = app._card_widgets[url]['heart_btn']
+    assert heart_btn.kwargs.get('border_width') == 0
+    assert heart_btn.kwargs.get('fg_color') == 'transparent'
+    assert heart_btn.kwargs.get('hover') is False
+    assert heart_btn.kwargs.get('image') == ctk_bookmark
+
+    # Saved state: no border, no background, hover disabled
+    monkeypatch.setattr(config, 'is_video_saved', lambda u: True)
+    gui_modern.ModernApp._update_card_heart_btn(app, url, animate=False)
+    assert heart_btn.kwargs.get('border_width') == 0
+    assert heart_btn.kwargs.get('fg_color') == 'transparent'
+    assert heart_btn.kwargs.get('hover') is False
+    assert heart_btn.kwargs.get('image') == ctk_bookmark_solid
+
+    # Download button: idle state displays download icon
+    gui_modern.ModernApp._update_card_download_btn(app, url)
+    dl_btn = app._card_widgets[url]['dl_btn']
+    assert dl_btn.kwargs.get('border_width') == 0
+    assert dl_btn.kwargs.get('fg_color') == 'transparent'
+    assert dl_btn.kwargs.get('hover') is False
+    assert dl_btn.kwargs.get('image') == ctk_dl
+
+    # Download button: completed state displays clean green checkmark icon
+    class DummyItem:
+        state = '已下載'
+        progress = '100%'
+        url = 'https://test/1'
+    app._dlmgr = types.SimpleNamespace(get_items=lambda: [DummyItem()], _active=set(), _pending=[])
+    gui_modern.ModernApp._update_card_download_btn(app, url)
+    assert dl_btn.kwargs.get('border_width') == 0
+    assert dl_btn.kwargs.get('fg_color') == 'transparent'
+    assert dl_btn.kwargs.get('hover') is False
+
+def test_render_heroicon_refresh_and_star():
+    for kind in ('refresh', 'arrow_path', 'star', 'star_solid', 'star_outline'):
+        im = ui_theme.render_heroicon(kind, size=16)
+        assert im.size == (16, 16)
+
+
+def test_status_bar_tag_heading_styling_and_actions(monkeypatch):
+    import config
+
+    class DummyWidget:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = dict(kwargs)
+            self._mapped = False
+            self.pack_calls = []
+
+        def pack(self, *args, **kwargs):
+            self.pack_calls.append(kwargs)
+            self._mapped = True
+
+        def pack_forget(self):
+            self._mapped = False
+
+        def configure(self, **kwargs):
+            self.kwargs.update(kwargs)
+
+        def winfo_ismapped(self):
+            return self._mapped
+
+        def bind(self, *args, **kwargs):
+            pass
+
+    app = types.SimpleNamespace()
+    status_bar = DummyWidget()
+    app._status_bar = status_bar
+    app._status_lbl = DummyWidget()
+    app._status_lbl.pack(side='left', padx=16)
+    app._refresh_icon = 'mock_refresh_icon'
+    app._refresh_icon_hover = 'mock_refresh_hover'
+    app._ENTITY_LABELS = {'tag': 'Tag', 'actress': 'Actress'}
+    app._site_key = 'JableTV'
+    app._refresh_entity_heading = lambda: gui_modern.ModernApp._refresh_entity_heading(app)
+    app._update_heading_star_state = lambda is_starred: gui_modern.ModernApp._update_heading_star_state(app, is_starred)
+
+    heading = DummyWidget()
+    heading.kwargs = {'fg_color': 'transparent', 'border_width': 0}
+    app._page_heading = heading
+
+    close_btn = DummyWidget()
+    close_btn.kwargs = {'border_width': 0, 'fg_color': 'transparent', 'hover': False}
+    app._page_heading_close = close_btn
+
+    star_btn = DummyWidget()
+    star_btn.kwargs = {'border_width': 0, 'fg_color': 'transparent', 'hover': False, 'text': '☆'}
+    app._page_heading_star = star_btn
+
+    ref_btn = DummyWidget()
+    ref_btn.kwargs = {'border_width': 0, 'fg_color': 'transparent', 'hover': False, 'image': app._refresh_icon}
+    app._page_heading_refresh = ref_btn
+
+    lbl = DummyWidget()
+    app._page_heading_lbl = lbl
+    sep = DummyWidget()
+    app._page_heading_sep = sep
+
+    # Verify initial styling meets zero border & zero background requirements
+    assert close_btn.kwargs.get('border_width') == 0
+    assert close_btn.kwargs.get('fg_color') == 'transparent'
+    assert close_btn.kwargs.get('hover') is False
+
+    assert star_btn.kwargs.get('border_width') == 0
+    assert star_btn.kwargs.get('fg_color') == 'transparent'
+    assert star_btn.kwargs.get('hover') is False
+
+    assert ref_btn.kwargs.get('border_width') == 0
+    assert ref_btn.kwargs.get('fg_color') == 'transparent'
+    assert ref_btn.kwargs.get('hover') is False
+    assert ref_btn.kwargs.get('image') == 'mock_refresh_icon'
+
+    # Show tag heading
+    gui_modern.ModernApp._show_page_heading(app, 'tag', 'Big Tits')
+    assert heading.winfo_ismapped() is True
+    assert 'Big Tits' in lbl.kwargs.get('text', '')
+    # Check that heading was packed before status_lbl on status_bar
+    last_pack = heading.pack_calls[-1]
+    assert last_pack.get('side') == 'left'
+    assert last_pack.get('before') == app._status_lbl
+
+    # Toggle star favorite
+    fav_state = [False]
+    monkeypatch.setattr(config, 'is_tag_favorite', lambda name, kind='tag': fav_state[0])
+    def dummy_toggle(name, kind='tag'):
+        fav_state[0] = not fav_state[0]
+        return fav_state[0]
+    monkeypatch.setattr(config, 'toggle_favorite_tag', dummy_toggle)
+
+    gui_modern.ModernApp._toggle_current_entity_star(app)
+    assert star_btn.kwargs.get('text') == '★'
+    gui_modern.ModernApp._toggle_current_entity_star(app)
+    assert star_btn.kwargs.get('text') == '☆'
+
+    # Hide heading (back to normal browsing)
+    gui_modern.ModernApp._hide_page_heading(app)
+    assert heading.winfo_ismapped() is False
+
+
+
 
 
 

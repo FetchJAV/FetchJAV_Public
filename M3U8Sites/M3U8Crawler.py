@@ -786,7 +786,9 @@ class M3U8Crawler:
         n = len(self._tsList)
         print(f'開始合成影片...共有 {n} 個片段', flush=True)
 
-        workdir = tempfile.mkdtemp(prefix='jbremux_')   # local, per-user temp
+        # Keep the full-size merge/remux copies on the download volume, not the
+        # system %TEMP% (often C:), which would consume up to two extra copies.
+        workdir = tempfile.mkdtemp(prefix='jbremux_', dir=self._dest_folder)
         merged = os.path.join(workdir, 'merged.ts')
         out_mp4 = os.path.join(workdir, 'out.mp4')
         published = False

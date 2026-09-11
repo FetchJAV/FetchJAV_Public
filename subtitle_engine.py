@@ -2291,7 +2291,9 @@ def _run_whisper(exe: str, model: str, vad_model: str, wav_path: str,
         raise _asr_failure('runtime')
 
     try:
-        work_dir = tempfile.mkdtemp(prefix='jable-asr-')
+        work_dir = tempfile.mkdtemp(
+            prefix='jable-asr-',
+            dir=os.path.dirname(os.path.abspath(wav_path)))
     except OSError as exc:
         raise _asr_failure('runtime') from exc
     try:
@@ -2806,7 +2808,9 @@ def _run_reazonspeech(
         pack_root, cancel_check=cancel_check)
 
     try:
-        work_dir = tempfile.mkdtemp(prefix='jable-reazonspeech-')
+        work_dir = tempfile.mkdtemp(
+            prefix='jable-reazonspeech-',
+            dir=os.path.dirname(os.path.abspath(wav_path)))
     except OSError as exc:
         raise _asr_failure('runtime') from exc
     try:
@@ -5217,7 +5221,8 @@ def generate_subtitles(video_path: str, mode,
                     progress_callback, cancel_check)
 
         with tempfile.TemporaryDirectory(
-                prefix='jable-subtitle-') as temp_dir:
+                prefix='jable-subtitle-',
+                dir=os.path.dirname(video_path)) as temp_dir:
             wav = os.path.join(temp_dir, 'audio.wav')
             log = os.path.join(temp_dir, 'process.log')
             if need_whisper:

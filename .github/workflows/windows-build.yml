@@ -3,7 +3,7 @@ name: windows-build
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [main, master]
     paths:
       - "*.py"
       - "M3U8Sites/**"
@@ -254,7 +254,7 @@ jobs:
       - name: Verify executable metadata
         shell: pwsh
         run: |
-          $expected = "0.1.10.0"
+          $expected = "0.1.11.0"
           $files = @(
             "dist\JableTV_Modern.exe",
             "dist\Jable_smalltool.exe",

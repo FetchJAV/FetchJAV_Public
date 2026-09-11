@@ -4,14 +4,14 @@ from locales import get_lang
 
 
 TAG_GROUPS = {
-    '衣著': {'en': 'Clothing', 'zh': '衣著', 'zh-Hans': '服装', 'ja': '服装'},
-    '身材': {'en': 'Body', 'zh': '身材', 'zh-Hans': '身材', 'ja': 'スタイル'},
-    '交合': {'en': 'Acts', 'zh': '交合', 'zh-Hans': '交合', 'ja': 'プレイ'},
-    '玩法': {'en': 'Kinks', 'zh': '玩法', 'zh-Hans': '玩法', 'ja': 'プレイ種類'},
-    '劇情': {'en': 'Story', 'zh': '劇情', 'zh-Hans': '剧情', 'ja': 'シチュ'},
-    '角色': {'en': 'Roles', 'zh': '角色', 'zh-Hans': '角色', 'ja': '役柄'},
-    '地點': {'en': 'Places', 'zh': '地點', 'zh-Hans': '地点', 'ja': '場所'},
-    '雜項': {'en': 'Misc', 'zh': '雜項', 'zh-Hans': '杂项', 'ja': 'その他'},
+    '衣著': {'en': 'Clothing', 'zh': '衣著', 'zh-Hans': '服装', 'ja': '服装', 'ko': '의상'},
+    '身材': {'en': 'Body', 'zh': '身材', 'zh-Hans': '身材', 'ja': 'スタイル', 'ko': '체형'},
+    '交合': {'en': 'Acts', 'zh': '交合', 'zh-Hans': '交合', 'ja': 'プレイ', 'ko': '행위'},
+    '玩法': {'en': 'Kinks', 'zh': '玩法', 'zh-Hans': '玩法', 'ja': 'プレイ種類', 'ko': '플레이'},
+    '劇情': {'en': 'Story', 'zh': '劇情', 'zh-Hans': '剧情', 'ja': 'シチュ', 'ko': '스토리'},
+    '角色': {'en': 'Roles', 'zh': '角色', 'zh-Hans': '角色', 'ja': '役柄', 'ko': '역할'},
+    '地點': {'en': 'Places', 'zh': '地點', 'zh-Hans': '地点', 'ja': '場所', 'ko': '장소'},
+    '雜項': {'en': 'Misc', 'zh': '雜項', 'zh-Hans': '杂项', 'ja': 'その他', 'ko': '기타'},
 }
 
 

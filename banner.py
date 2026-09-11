@@ -40,6 +40,8 @@ ALLOWED_TYPES = {'info', 'update', 'ad'}
 _lock = threading.Lock()
 _cached_manifest = None
 _cached_at = 0.0
+_dismissed_cache = None
+_dismissed_lock = threading.Lock()
 
 
 def _app_dir() -> str:
@@ -149,26 +151,38 @@ def matches_versions(manifest: dict, current_version: str) -> bool:
 
 
 def dismissed_ids() -> set:
-    try:
-        with open(_dismissed_path(), 'r', encoding='utf-8') as f:
-            raw = json.load(f)
-        if isinstance(raw, list):
-            return {str(x) for x in raw if x}
-    except Exception:
-        pass
-    return set()
+    global _dismissed_cache
+    with _dismissed_lock:
+        if _dismissed_cache is None:
+            try:
+                with open(_dismissed_path(), 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+                if isinstance(raw, list):
+                    _dismissed_cache = {str(x) for x in raw if x}
+                else:
+                    _dismissed_cache = set()
+            except Exception:
+                _dismissed_cache = set()
+        return set(_dismissed_cache)
 
 
-def remember_dismissed(banner_id: str) -> None:
-    ids = dismissed_ids()
-    ids.add(str(banner_id))
-    ids = set(sorted(ids)[-50:])
+def _persist_dismissed(ids: set) -> None:
     try:
         os.makedirs(_app_dir(), exist_ok=True)
         with open(_dismissed_path(), 'w', encoding='utf-8') as f:
             json.dump(sorted(ids), f)
     except Exception:
         pass
+
+
+def remember_dismissed(banner_id: str) -> None:
+    global _dismissed_cache
+    with _dismissed_lock:
+        ids = set(_dismissed_cache) if _dismissed_cache is not None else dismissed_ids()
+        ids.add(str(banner_id))
+        ids = set(sorted(ids)[-50:])
+        _dismissed_cache = set(ids)
+    threading.Thread(target=_persist_dismissed, args=(set(ids),), daemon=True).start()
 
 
 def _read_cache():
