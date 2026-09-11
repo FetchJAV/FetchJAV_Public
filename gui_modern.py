@@ -1697,7 +1697,10 @@ class ModernApp(ctk.CTk):
         # Browse state
         self._inactive_sites = set(config.get_inactive_sites())
         _active_sites_init = [k for k in SITES.keys() if k not in self._inactive_sites]
-        self._site_key = _active_sites_init[0] if _active_sites_init else 'JableTV'
+        if (config.get_ui_lang() == 'ko' or get_lang() == 'ko') and 'MissAV' in SITES and 'MissAV' not in self._inactive_sites:
+            self._site_key = 'MissAV'
+        else:
+            self._site_key = _active_sites_init[0] if _active_sites_init else 'JableTV'
         self._categories: list[dict] = []
         self._current_base_url = ''
         self._page = 1
@@ -2257,8 +2260,15 @@ class ModernApp(ctk.CTk):
 
             def _choose(code='en'):
                 config.set_ui_lang(code)
+                if code == 'ko':
+                    self._site_key = 'MissAV'
                 if code != get_lang():
                     self._apply_language(code)
+                elif code == 'ko':
+                    if hasattr(self, '_site_menu') and self._site_menu:
+                        self._site_menu.set_selected('MissAV', trigger_command=True)
+                    elif hasattr(self, '_on_site_change'):
+                        self._on_site_change('MissAV')
                 try:
                     popup.destroy()
                 except tk.TclError:
@@ -3070,7 +3080,16 @@ class ModernApp(ctk.CTk):
 
     def _on_lang_change(self, display_name):
         code = self._lang_code_by_name.get(display_name)
-        if not code or code == get_lang():
+        if not code:
+            return
+        if code == 'ko':
+            self._site_key = 'MissAV'
+        if code == get_lang():
+            if code == 'ko':
+                if hasattr(self, '_site_menu') and self._site_menu:
+                    self._site_menu.set_selected('MissAV', trigger_command=True)
+                elif hasattr(self, '_on_site_change'):
+                    self._on_site_change('MissAV')
             return
         self._apply_language(code)
 
@@ -3101,7 +3120,7 @@ class ModernApp(ctk.CTk):
                 'max_workers_per_video': self._commit_workers_preference(),
                 'speed_mbps': self._speed_mbps,
                 'resolution_pref': get_resolution_pref(),
-                'site_key': self._site_key,
+                'site_key': 'MissAV' if code == 'ko' else self._site_key,
             }
 
             set_lang(code)
@@ -3145,6 +3164,8 @@ class ModernApp(ctk.CTk):
 
             if hasattr(self, '_site_var') and self._site_var:
                 self._site_var.set(snapshot['site_key'])
+            if hasattr(self, '_site_menu') and self._site_menu:
+                self._site_menu.set_selected(snapshot['site_key'], trigger_command=False)
             if hasattr(self, '_dest_var') and self._dest_var:
                 self._dest_var.set(snapshot['dest'])
             if hasattr(self, '_dl_url_var') and self._dl_url_var:
@@ -7546,6 +7567,28 @@ class ModernApp(ctk.CTk):
                          wraplength=SETTINGS_INLINE_HELP_WRAP,
                          justify='left', anchor='w').pack(
                              anchor='w', padx=SETTINGS_DESC_PADX, pady=SETTINGS_DESC_PADY)
+
+            # Notice / Guidance Card for Korean Language Source Support
+            korean_notice_card = ctk.CTkFrame(
+                grp, fg_color=BG_CARD, corner_radius=CARD_RADIUS,
+                border_width=1, border_color=BORDER_CARD
+            )
+            korean_notice_card.pack(fill='x', pady=SETTINGS_CARD_PADY)
+
+            korean_notice_inner = ctk.CTkFrame(korean_notice_card, fg_color='transparent')
+            korean_notice_inner.pack(fill='x', padx=16, pady=12)
+
+            ctk.CTkLabel(
+                korean_notice_inner, text=T('korean_support_notice_title'),
+                font=(ui_font(), 11, 'bold'), text_color=TEXT_PRI, anchor='w'
+            ).pack(anchor='w', pady=(0, 4))
+
+            ctk.CTkLabel(
+                korean_notice_inner, text=T('korean_support_notice_desc'),
+                text_color=TEXT_SEC, font=(ui_font(), 10),
+                wraplength=SETTINGS_INLINE_HELP_WRAP - 30,
+                justify='left', anchor='w'
+            ).pack(anchor='w')
 
         def render_download_page(container):
             grp = ctk.CTkFrame(container, fg_color='transparent')

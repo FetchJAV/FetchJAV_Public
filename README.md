@@ -6,17 +6,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DeepanshuK2002/FetchJAV?style=flat-square&label=release&color=ff5263" /></a>
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/DeepanshuK2002/FetchJAV/total?style=flat-square&label=downloads&color=2ea44f" /></a>
-  <a href="https://github.com/DeepanshuK2002/FetchJAV"><img alt="GitHub stars" src="https://img.shields.io/github/stars/DeepanshuK2002/FetchJAV?style=flat-square&logo=github&color=f5b942" /></a>
-  <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/github/license/DeepanshuK2002/FetchJAV?style=flat-square" /></a>
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/pkgs/container/jabletv"><img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/FetchJAV/FetchJAV_Public?style=flat-square&label=release&color=ff5263" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/FetchJAV/FetchJAV_Public/total?style=flat-square&label=downloads&color=2ea44f" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FetchJAV/FetchJAV_Public?style=flat-square&logo=github&color=f5b942" /></a>
+  <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/github/license/FetchJAV/FetchJAV_Public?style=flat-square" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/pkgs/container/jabletv"><img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" /></a>
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe">Download FetchJAV.exe (Windows Direct)</a></strong>
+  <strong><a href="https://github.com/FetchJAV/FetchJAV_Public/releases/latest/download/FetchJAV.exe">Download FetchJAV.exe (Windows Direct)</a></strong>
   &middot;
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/releases">View Latest Release</a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/releases">View Latest Release</a>
 </p>
 
 ---
@@ -72,7 +72,7 @@ FetchJAV is a feature-rich Python desktop application for downloading, streaming
 - Maintain persistent download history, view history, and saved video libraries
 - Deploy headlessly on NAS/Docker for unattended batch downloading
 
-**Author:** Forked and extended by DeepanshuK2002 as "FetchJAV"
+**Author:** Developed and maintained by FetchJAV
 **Upstream:** [Alos21750/JableTV-MissAV-Downloader-GUI-2026](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026)
 
 ---
@@ -194,7 +194,7 @@ Configure destination folders, default resolution preferences (Highest, 1080p, 7
 
 ### Windows: Ready in 30 Seconds
 
-1. **Download**: Get the latest [FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe).
+1. **Download**: Get the latest [FetchJAV.exe](https://github.com/FetchJAV/FetchJAV_Public/releases/latest/download/FetchJAV.exe).
 2. **Run**: Place it in any writable folder and double-click to launch (no Python or FFmpeg installation required).
 3. **Choose Language**: On first launch, pick your language and preferred theme.
 4. **Browse & Download**:
@@ -216,7 +216,7 @@ The simplest way to use FetchJAV. Download the pre-built executable — everythi
 
 ```bash
 # Download the latest release
-# https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe
+# https://github.com/FetchJAV/FetchJAV_Public/releases/latest/download/FetchJAV.exe
 
 # Place in any writable folder and double-click to run
 # No installation required
@@ -228,7 +228,7 @@ Requires **Python 3.10+** and Tk (usually included with Python on macOS; may nee
 
 ```bash
 # Clone the repository
-git clone https://github.com/DeepanshuK2002/FetchJAV.git
+git clone https://github.com/FetchJAV/FetchJAV_Public.git
 cd FetchJAV
 
 # Create and activate a virtual environment (recommended)
@@ -247,16 +247,16 @@ python main.py
 
 ### Docker / NAS Headless Deployment
 
-The public container image is available at `ghcr.io/deepanshuk2002/fetchjav:latest` for amd64 and arm64 architectures.
+The public container image is available at `ghcr.io/fetchjav/jabletv:latest` for amd64 and arm64 architectures.
 
 ```bash
 # Download a single URL to /downloads folder
 docker run --rm -v "/path/to/downloads:/downloads" \
-  ghcr.io/deepanshuk2002/fetchjav:latest "https://jable.tv/videos/example/"
+  ghcr.io/fetchjav/jabletv:latest "https://jable.tv/videos/example/"
 
 # Multiple URLs
 docker run --rm -v "/path/to/downloads:/downloads" \
-  ghcr.io/deepanshuk2002/fetchjav:latest \
+  ghcr.io/fetchjav/jabletv:latest \
   "https://jable.tv/videos/1/" "https://missav.ai/abc123/"
 ```
 
@@ -759,13 +759,13 @@ JABLE_LLM_TRANSLATION_DIAGNOSTIC_OUTPUT=result.json python main.py
 
 ### Crash Logs
 
-If FetchJAV crashes, a `crash_log.txt` file is generated beside the executable. Include this file when [filing an issue](https://github.com/DeepanshuK2002/FetchJAV/issues/new).
+If FetchJAV crashes, a `crash_log.txt` file is generated beside the executable. Include this file when [filing an issue](https://github.com/FetchJAV/FetchJAV_Public/issues/new).
 
 ---
 
 ## Contributing
 
-Contributions are welcome! When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/new), please include:
+Contributions are welcome! When opening a [GitHub Issue](https://github.com/FetchJAV/FetchJAV_Public/issues/new), please include:
 
 - **App version** and **operating system**
 - **Target website**, **reproducible URL**, and **error messages**
@@ -775,7 +775,7 @@ Contributions are welcome! When opening a [GitHub Issue](https://github.com/Deep
 ### Development Setup
 
 ```bash
-git clone https://github.com/DeepanshuK2002/FetchJAV.git
+git clone https://github.com/FetchJAV/FetchJAV_Public.git
 cd FetchJAV
 python -m venv .venv
 .venv\Scripts\activate  # Windows
@@ -825,7 +825,7 @@ This tool is provided for **personal research and legal backup purposes only**. 
 ## Acknowledgments
 
 - **ALOS (Alos21750)** — Original author of [JableTV-MissAV-Downloader-GUI-2026](https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026)
-- **DeepanshuK2002** — FetchJAV fork maintainer and primary contributor
+- **FetchJAV Team** — Maintainers and contributors
 - All contributors and testers who help improve FetchJAV
 - The open-source libraries that make this project possible
 
@@ -833,6 +833,6 @@ This tool is provided for **personal research and legal backup purposes only**. 
 
 ## Changelog & Releases
 
-See [GitHub Releases](https://github.com/DeepanshuK2002/FetchJAV/releases) for the latest version history and release notes.
+See [GitHub Releases](https://github.com/FetchJAV/FetchJAV_Public/releases) for the latest version history and release notes.
 
 

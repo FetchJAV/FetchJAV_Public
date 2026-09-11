@@ -10,17 +10,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/DeepanshuK2002/FetchJAV?style=flat-square&label=release&color=ff5263" /></a>
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/DeepanshuK2002/FetchJAV/total?style=flat-square&label=downloads&color=2ea44f" /></a>
-  <a href="https://github.com/DeepanshuK2002/FetchJAV"><img alt="GitHub stars" src="https://img.shields.io/github/stars/DeepanshuK2002/FetchJAV?style=flat-square&logo=github&color=f5b942" /></a>
-  <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/github/license/DeepanshuK2002/FetchJAV?style=flat-square" /></a>
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/pkgs/container/jabletv"><img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/FetchJAV/FetchJAV_Public?style=flat-square&label=release&color=ff5263" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/FetchJAV/FetchJAV_Public/total?style=flat-square&label=downloads&color=2ea44f" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FetchJAV/FetchJAV_Public?style=flat-square&logo=github&color=f5b942" /></a>
+  <a href="./LICENSE"><img alt="Apache 2.0 license" src="https://img.shields.io/github/license/FetchJAV/FetchJAV_Public?style=flat-square" /></a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/pkgs/container/jabletv"><img alt="Docker amd64 and arm64" src="https://img.shields.io/badge/Docker-amd64%20%7C%20arm64-2496ed?style=flat-square&logo=docker&logoColor=white" /></a>
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe">⬇️ Download FetchJAV.exe (Windows Direct)</a></strong>
+  <strong><a href="https://github.com/FetchJAV/FetchJAV_Public/releases/latest/download/FetchJAV.exe">⬇️ Download FetchJAV.exe (Windows Direct)</a></strong>
   ·
-  <a href="https://github.com/DeepanshuK2002/FetchJAV/releases/latest">📦 View Latest Release</a>
+  <a href="https://github.com/FetchJAV/FetchJAV_Public/releases/latest">📦 View Latest Release</a>
 </p>
 
 ---
@@ -125,7 +125,7 @@ Extract burnt-in subtitles directly from video frames into standard `.srt` subti
 
 ## 🚀 Windows: Quick Start in 30 Seconds
 
-1. **Download**: Get the latest **[FetchJAV.exe](https://github.com/DeepanshuK2002/FetchJAV/releases/latest/download/FetchJAV.exe)**.
+1. **Download**: Get the latest **[FetchJAV.exe](https://github.com/FetchJAV/FetchJAV_Public/releases/latest/download/FetchJAV.exe)**.
 2. **Run**: Place it in any writable folder and double-click to launch (no Python or FFmpeg installation required).
 3. **Choose Language**: On first launch, pick your language and preferred theme.
 4. **Browse & Download**:
@@ -143,7 +143,7 @@ Requires **Python 3.10+** and Tk:
 
 ```bash
 # Clone the repository
-git clone https://github.com/DeepanshuK2002/FetchJAV.git
+git clone https://github.com/FetchJAV/FetchJAV_Public.git
 cd FetchJAV
 
 # Install dependencies
@@ -160,12 +160,12 @@ python main.py --nogui --url "https://jable.tv/videos/example/" --output "./down
 
 ## 🐳 Docker / NAS Headless Deployment
 
-The public container image is available at `ghcr.io/deepanshuk2002/fetchjav:latest`:
+The public container image is available at `ghcr.io/fetchjav/jabletv:latest`:
 
 ```bash
 # Download a single URL to /downloads folder
 docker run --rm -v "/path/to/downloads:/downloads" \
-  ghcr.io/deepanshuk2002/fetchjav:latest "https://jable.tv/videos/example/"
+  ghcr.io/fetchjav/jabletv:latest "https://jable.tv/videos/example/"
 
 # Docker Compose: pass urls via urls.txt
 docker compose run --rm jabletv
@@ -175,7 +175,7 @@ docker compose run --rm jabletv
 
 ## 🤝 Contributing & Bug Reports
 
-When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/new), please include:
+When opening a [GitHub Issue](https://github.com/FetchJAV/FetchJAV_Public/issues/new), please include:
 - App version and operating system.
 - Target website, reproducible URL, and error messages.
 - If a crash occurred, attach `crash_log.txt` from beside the executable.
@@ -185,4 +185,4 @@ When opening a [GitHub Issue](https://github.com/DeepanshuK2002/FetchJAV/issues/
 ## 📜 License & Disclaimer
 
 Code is open source under the [Apache License 2.0](./LICENSE). Use this tool only for lawful personal or research purposes.
-See [GitHub Releases](https://github.com/DeepanshuK2002/FetchJAV/releases) for version notes.
+See [GitHub Releases](https://github.com/FetchJAV/FetchJAV_Public/releases) for version notes.

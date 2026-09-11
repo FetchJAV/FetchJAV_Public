@@ -17,7 +17,7 @@ user data.
 ## Remotes and branches
 
 ```
-origin   = https://github.com/DeepanshuK2002/FetchJAV.git        (FetchJAV)
+origin   = https://github.com/FetchJAV/FetchJAV_Public.git        (FetchJAV)
 upstream = https://github.com/Alos21750/JableTV-MissAV-Downloader-GUI-2026.git
 ```
 

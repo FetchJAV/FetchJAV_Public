@@ -56,7 +56,7 @@ These are the FetchJAV deliverables that the sync must always preserve:
   (sidecar `.ja/.en/.zh-TW.srt` generation), `metadata_fetcher.py`.
 - **Hot reload** (`hot_reload.py`, `--hot-reload` flag) — upstream deleted it.
 - **Branding**: `README.md`/`README.en.md`, `WINDOWS_SECURITY.md`, logos/favicons.
-- **Updater**: downloads releases of *FetchJAV* (`DeepanshuK2002/FetchJAV`),
+- **Updater**: downloads releases of *FetchJAV* (`FetchJAV/FetchJAV_Public`),
   not upstream builds.
 
 ## Key integration surfaces

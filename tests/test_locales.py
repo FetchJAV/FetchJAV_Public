@@ -192,3 +192,26 @@ def test_missav_language_paths_use_empty_string_for_default(monkeypatch):
         'https://missav.ai/search/abc%20def',
         'https://missav.ai/cn/search/abc%20def',
     ]
+
+
+def test_korean_support_notice_copy_present():
+    for lang in LANGS:
+        title = locales.STRINGS[lang]['korean_support_notice_title']
+        desc = locales.STRINGS[lang]['korean_support_notice_desc']
+        assert title and isinstance(title, str)
+        assert desc and isinstance(desc, str)
+        assert 'MissAV' in desc
+
+
+def test_korean_language_selection_defaults_missav():
+    import gui_modern
+
+    app = gui_modern.ModernApp.__new__(gui_modern.ModernApp)
+    app._site_key = 'JableTV'
+    app._lang_code_by_name = {name: code for code, name in gui_modern.LANGUAGES}
+    applied = []
+    app._apply_language = lambda code: applied.append(code)
+
+    app._on_lang_change('한국어')
+    assert app._site_key == 'MissAV'
+    assert applied == ['ko']

@@ -21,7 +21,12 @@ download/
 scratch/
 JableTV-MissAV-Downloader-GUI-2026-master/
 
+# Excluded developer & private assets
+client_id.txt
+*.tmp
+
 # IDE & Editor settings
 .vscode/
 .idea/
 .DS_Store
+
