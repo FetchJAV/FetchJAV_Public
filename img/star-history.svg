@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480"
   viewBox="0 0 1200 480" role="img"
-  aria-labelledby="title description" data-history-hash="f8fe197d4093737a1b0a">
+  aria-labelledby="title description" data-history-hash="7ab85b60444e46e56623">
   <title id="title">GitHub star history for FetchJAV/FetchJAV_Public</title>
-  <desc id="description">13 current stargazers grouped by the date each star was added. Updated 2026-10-04.</desc>
+  <desc id="description">14 current stargazers grouped by the date each star was added. Updated 2026-10-05.</desc>
   <defs>
     <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ff5263" stop-opacity="0.34"/>
@@ -11,14 +11,14 @@
   </defs>
   <rect x="1" y="1" width="1198" height="478" rx="18" fill="#0d1117" stroke="#30363d"/>
   <text x="42" y="48" fill="#f0f6fc" font-family="Segoe UI, sans-serif" font-size="24" font-weight="700">Star history</text>
-  <text x="42" y="75" fill="#8b949e" font-family="Segoe UI, sans-serif" font-size="14">Current stargazers grouped by starredAt · updated 2026-10-04</text>
-  <text x="1158" y="52" fill="#ff6374" font-family="Segoe UI, sans-serif" font-size="30" font-weight="700" text-anchor="end">13 stars</text>
+  <text x="42" y="75" fill="#8b949e" font-family="Segoe UI, sans-serif" font-size="14">Current stargazers grouped by starredAt · updated 2026-10-05</text>
+  <text x="1158" y="52" fill="#ff6374" font-family="Segoe UI, sans-serif" font-size="30" font-weight="700" text-anchor="end">14 stars</text>
   <g font-family="Segoe UI, sans-serif" font-size="13">
     <line class="grid" x1="82" y1="416.0" x2="1152" y2="416.0"/><text class="axis" x="66" y="421.0" text-anchor="end">0</text><line class="grid" x1="82" y1="336.5" x2="1152" y2="336.5"/><text class="axis" x="66" y="341.5" text-anchor="end">5</text><line class="grid" x1="82" y1="257.0" x2="1152" y2="257.0"/><text class="axis" x="66" y="262.0" text-anchor="end">10</text><line class="grid" x1="82" y1="177.5" x2="1152" y2="177.5"/><text class="axis" x="66" y="182.5" text-anchor="end">15</text><line class="grid" x1="82" y1="98.0" x2="1152" y2="98.0"/><text class="axis" x="66" y="103.0" text-anchor="end">20</text>
-    <text class="axis" x="82.0" y="452" text-anchor="middle">2026-08-25</text><text class="axis" x="349.5" y="452" text-anchor="middle">2026-09-04</text><text class="axis" x="617.0" y="452" text-anchor="middle">2026-09-14</text><text class="axis" x="884.5" y="452" text-anchor="middle">2026-09-24</text><text class="axis" x="1152.0" y="452" text-anchor="middle">2026-10-04</text>
+    <text class="axis" x="82.0" y="452" text-anchor="middle">2026-08-25</text><text class="axis" x="343.0" y="452" text-anchor="middle">2026-09-04</text><text class="axis" x="604.0" y="452" text-anchor="middle">2026-09-14</text><text class="axis" x="864.9" y="452" text-anchor="middle">2026-09-24</text><text class="axis" x="1152.0" y="452" text-anchor="middle">2026-10-05</text>
   </g>
-  <path d="M 82,416 L 82.0,400.1 L 108.8,400.1 L 135.5,400.1 L 162.2,368.3 L 189.0,336.5 L 215.8,336.5 L 242.5,320.6 L 269.2,304.7 L 296.0,288.8 L 322.8,272.9 L 349.5,272.9 L 376.2,272.9 L 403.0,272.9 L 429.8,272.9 L 456.5,272.9 L 483.2,272.9 L 510.0,272.9 L 536.8,272.9 L 563.5,272.9 L 590.2,272.9 L 617.0,272.9 L 643.8,272.9 L 670.5,272.9 L 697.2,272.9 L 724.0,272.9 L 750.8,272.9 L 777.5,257.0 L 804.2,257.0 L 831.0,257.0 L 857.8,257.0 L 884.5,257.0 L 911.2,257.0 L 938.0,257.0 L 964.8,257.0 L 991.5,257.0 L 1018.2,241.1 L 1045.0,241.1 L 1071.8,241.1 L 1098.5,241.1 L 1125.2,241.1 L 1152.0,209.3 L 1152,416 Z" fill="url(#area)"/>
-  <polyline points="82.0,400.1 108.8,400.1 135.5,400.1 162.2,368.3 189.0,336.5 215.8,336.5 242.5,320.6 269.2,304.7 296.0,288.8 322.8,272.9 349.5,272.9 376.2,272.9 403.0,272.9 429.8,272.9 456.5,272.9 483.2,272.9 510.0,272.9 536.8,272.9 563.5,272.9 590.2,272.9 617.0,272.9 643.8,272.9 670.5,272.9 697.2,272.9 724.0,272.9 750.8,272.9 777.5,257.0 804.2,257.0 831.0,257.0 857.8,257.0 884.5,257.0 911.2,257.0 938.0,257.0 964.8,257.0 991.5,257.0 1018.2,241.1 1045.0,241.1 1071.8,241.1 1098.5,241.1 1125.2,241.1 1152.0,209.3" fill="none" stroke="#ff5263" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="1152.0" cy="209.3" r="6" fill="#ff5263" stroke="#0d1117" stroke-width="3"/>
+  <path d="M 82,416 L 82.0,400.1 L 108.1,400.1 L 134.2,400.1 L 160.3,368.3 L 186.4,336.5 L 212.5,336.5 L 238.6,320.6 L 264.7,304.7 L 290.8,288.8 L 316.9,272.9 L 343.0,272.9 L 369.1,272.9 L 395.2,272.9 L 421.3,272.9 L 447.4,272.9 L 473.5,272.9 L 499.6,272.9 L 525.7,272.9 L 551.8,272.9 L 577.9,272.9 L 604.0,272.9 L 630.0,272.9 L 656.1,272.9 L 682.2,272.9 L 708.3,272.9 L 734.4,272.9 L 760.5,257.0 L 786.6,257.0 L 812.7,257.0 L 838.8,257.0 L 864.9,257.0 L 891.0,257.0 L 917.1,257.0 L 943.2,257.0 L 969.3,257.0 L 995.4,241.1 L 1021.5,241.1 L 1047.6,241.1 L 1073.7,241.1 L 1099.8,241.1 L 1125.9,209.3 L 1152.0,193.4 L 1152,416 Z" fill="url(#area)"/>
+  <polyline points="82.0,400.1 108.1,400.1 134.2,400.1 160.3,368.3 186.4,336.5 212.5,336.5 238.6,320.6 264.7,304.7 290.8,288.8 316.9,272.9 343.0,272.9 369.1,272.9 395.2,272.9 421.3,272.9 447.4,272.9 473.5,272.9 499.6,272.9 525.7,272.9 551.8,272.9 577.9,272.9 604.0,272.9 630.0,272.9 656.1,272.9 682.2,272.9 708.3,272.9 734.4,272.9 760.5,257.0 786.6,257.0 812.7,257.0 838.8,257.0 864.9,257.0 891.0,257.0 917.1,257.0 943.2,257.0 969.3,257.0 995.4,241.1 1021.5,241.1 1047.6,241.1 1073.7,241.1 1099.8,241.1 1125.9,209.3 1152.0,193.4" fill="none" stroke="#ff5263" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="1152.0" cy="193.4" r="6" fill="#ff5263" stroke="#0d1117" stroke-width="3"/>
   <style>.grid{stroke:#21262d;stroke-width:1}.axis{fill:#8b949e}</style>
 </svg>
