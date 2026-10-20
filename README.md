@@ -5,6 +5,8 @@
   Stream, download, and automatically transcribe videos from <strong>JableTV</strong>, <strong>MissAV</strong>, <strong>SupJav</strong>, and 30+ other sites — with local &amp; cloud AI subtitle engines.
 </p>
 
+<h1 align ="center"></CENTRE>A friendly request to all users: If you find any issues or have suggestions, please open an issue. Your feedback is always welcome and appreciated!</h1>
+
 <p align="center">
   <a href="https://github.com/FetchJAV/FetchJAV_Public/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/FetchJAV/FetchJAV_Public?style=flat-square&label=release&color=ff5263" /></a>
   <a href="https://github.com/FetchJAV/FetchJAV_Public/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/FetchJAV/FetchJAV_Public/total?style=flat-square&label=downloads&color=2ea44f" /></a>
