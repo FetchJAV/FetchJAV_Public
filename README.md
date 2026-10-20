@@ -5,7 +5,7 @@
   Stream, download, and automatically transcribe videos from <strong>JableTV</strong>, <strong>MissAV</strong>, <strong>SupJav</strong>, and 30+ other sites — with local &amp; cloud AI subtitle engines.
 </p>
 
-<h3 align="center"><span style="color:red;">A friendly request to all users: If you find any issues or have suggestions, please open an issue. Your feedback is always welcome and appreciated!</span></h3>
+<h3 align="center"><span style="color:red;"> A friendly request to all users: If you find any issues or have suggestions, please open an issue. Your feedback is always welcome and appreciated!</span></h3>
 
 
 <p align="center">
