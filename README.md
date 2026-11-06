@@ -21,8 +21,21 @@
   &middot;
   <a href="https://github.com/FetchJAV/FetchJAV_Public/releases">View Latest Release</a>
 </p>
+<hr>
 
----
+<h3 align="center">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/VLC_icon.png/48px-VLC_icon.png" width="24" alt="VLC Logo">
+  VLC Integration for Live Preview
+</h3>
+
+<p align="center">
+  <mark style="background-color: #fff176; color: #000; padding: 2px 5px;">
+    VLC is currently our best available solution for live preview.
+  </mark>
+  <br><br>
+  We've been exploring lightweight alternatives and considering building our own solution if nothing suitable is available. Until then, we'll use VLC as the preview engine to ensure reliable playback and smooth performance without compromising existing application features.
+</p>
+<hr>
 
 ## Table of Contents
 
