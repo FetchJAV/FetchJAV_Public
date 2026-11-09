@@ -854,4 +854,64 @@ This tool is provided for **personal research and legal backup purposes only**. 
 
 See [GitHub Releases](https://github.com/FetchJAV/FetchJAV_Public/releases) for the latest version history and release notes.
 
+## ⚠️ Windows Smart App Control Warning
 
+You may encounter the following Windows security warning when installing or running our application:
+
+> **Smart App Control has blocked this app.**
+
+### Why Does This Happen?
+
+We are an independent, open-source project and currently do not have a paid code-signing certificate. Obtaining and maintaining a trusted digital signing certificate involves additional costs, which we cannot currently justify for this project.
+
+As a result, Windows may recognize our application as an untrusted or unknown publisher and prevent it from running.
+
+**This warning does not automatically mean that the application contains malware.** Windows Smart App Control can also block legitimate applications that lack a recognized digital signature.
+
+### 🔍 Our Commitment to Transparency
+
+We believe users deserve complete transparency and control over the software they use.
+
+- **100% Open Source:** Our complete source code is publicly available.
+- **Code Transparency:** Anyone can inspect, audit, and verify the code.
+- **No Intentional Malware:** We have not intentionally included viruses, spyware, malware, or malicious code.
+- **User Control:** We do not intend to install unauthorized third-party software or compromise your device.
+
+You are welcome to inspect the entire codebase or build the application yourself.
+
+### 🛠️ How to Turn Off Smart App Control
+
+If you have independently reviewed the project and trust the application, follow these steps:
+
+**Step 1: Open Windows Security**
+1. Press `Win + I` to open Windows Settings.
+2. Navigate to **Privacy & security**.
+3. Select **Windows Security**.
+
+**Step 2: Open App & Browser Control**
+1. Click **App & browser control**.
+2. Locate **Smart App Control settings**.
+
+**Step 3: Turn Off Smart App Control**
+1. Select the **Off** option.
+2. Confirm the Windows security prompt if requested.
+
+**Step 4: Run the Application**
+
+Try installing or launching the application again.
+
+> [!WARNING]
+> - Disabling Smart App Control reduces one layer of Windows security protection.
+> - Windows does not provide an option to create an individual exception for this feature.
+> - Only consider disabling it after independently verifying and trusting the application.
+> - Keep Microsoft Defender and other security protections enabled.
+> - Re-enabling Smart App Control may require resetting or reinstalling Windows, depending on your Windows version.
+
+**Official Microsoft Documentation:**  
+https://support.microsoft.com/en-us/windows/security-threat-malware-protection/smart-app-control-frequently-asked-questions
+
+---
+
+**Thank you for supporting open-source software! ❤️**
+
+Your trust, contributions, and feedback help us keep this project independent, transparent, and accessible to everyone.
