@@ -40,7 +40,25 @@
   We've been exploring lightweight alternatives and considering building our own solution if nothing suitable is available. Until then, we'll use VLC as the preview engine to ensure reliable playback and smooth performance without compromising existing application features.
 </p>
 <hr>
+<p align="center" >
+<img src="https://github.com/FetchJAV/FetchJAV_Public/blob/main/img/UcP6qZq.png"  width="400"
+       height="324" ></p>
+<h3 align="center">
+  ⚠️ Smart App Control Blocked This App?
+</h3>
+<p align="center">If Windows blocks FetchJAV, you can try adding its folder to Windows Defender exclusions:</p>
 
+1. Extract FetchJAV to a permanent folder.
+2. Open **Command Prompt as Administrator**.
+3. Navigate to the FetchJAV folder using `cd`.
+4. Run:
+
+```powershell
+Add-MpPreference -ExclusionPath "C:\Users\admin\Videos\Secure\FetchJAV"
+```
+
+Restart FetchJAV and try again.
+<hr>
 ## Table of Contents
 
 - [About](#about)
